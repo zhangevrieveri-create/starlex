@@ -1,7 +1,16 @@
+export type MusicId = "space" | "night";
+
+const TRACKS: Record<MusicId, string> = {
+  space: "/music/space.mp3",
+  night: "/music/night.mp3",
+};
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   muted = false;
   private lastShot = 0;
+  private music: HTMLAudioElement | null = null;
+  private track: MusicId | null = null;
 
   unlock() {
     const Ctor =
@@ -10,6 +19,39 @@ export class Sfx {
     if (!Ctor) return;
     if (!this.ctx) this.ctx = new Ctor();
     void this.ctx.resume();
+  }
+
+  playTrack(id: MusicId) {
+    if (this.muted) return;
+    this.unlock();
+    if (this.track === id && this.music) {
+      if (this.music.paused) void this.music.play().catch(() => {});
+      return;
+    }
+    this.stopMusic();
+    const audio = new Audio(TRACKS[id]);
+    audio.loop = true;
+    audio.volume = 0.32;
+    this.music = audio;
+    this.track = id;
+    void audio.play().catch(() => {});
+  }
+
+  pauseMusic() {
+    this.music?.pause();
+  }
+
+  playing() {
+    return Boolean(this.music && !this.music.paused && this.track);
+  }
+
+  stopMusic() {
+    if (!this.music) return;
+    this.music.pause();
+    this.music.removeAttribute("src");
+    this.music.load();
+    this.music = null;
+    this.track = null;
   }
 
   private tone(freq: number, dur: number, type: OscillatorType, gain: number, slideTo?: number) {

@@ -24,7 +24,7 @@ type Screen = "menu" | "play" | "lexicon" | "scores" | "install";
 
 const THEATERS: { id: Theater; label: string; copy: string }[] = [
   { id: "space", label: "星域", copy: "駕駛新的攔截機。敵艦會開火，首領掉到血線就鎖盾。" },
-  { id: "night", label: "喪屍夜", copy: "換成倖存者。屍群只會撲過來，屍王一樣要答對才能繼續扣血。" },
+  { id: "night", label: "喪屍夜", copy: "屍群會停在遠處瞄準你。普通屍吐一口，跑尸連射，壯屍撒酸。答對才能打屍王。" },
 ];
 
 const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
@@ -212,7 +212,7 @@ export function StarAssault() {
               />
               <p className="mt-3 text-base leading-relaxed text-muted">
                 {save.theater === "night"
-                  ? "屍群從街口撲下來。小兵直接打。屍王血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血。"
+                  ? "屍群會停在遠處開火。小兵直接打。屍王血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血。"
                   : "小兵直接打掉。首領血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血、開往下一波。"}
               </p>
               {best && (
@@ -382,7 +382,7 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "拖曳或 WASD 移動，步槍會自己開火。屍群靠過來就躲開，壯屍會吐酸。"
+            ? "拖曳或 WASD 移動，步槍會自己開火。喪屍會拉開距離遠攻，別站著吃酸。"
             : "拖曳或 WASD 移動，攔截機會自己對準上方開火。撿到散、盾、速會短時間強化。"}
         </p>
       )}

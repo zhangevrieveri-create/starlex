@@ -92,6 +92,8 @@ declare global {
       maxHp: () => number;
       bossAlive: () => boolean;
       wave: () => number;
+      hostile: () => number;
+      music: () => boolean;
     };
   }
 }
@@ -198,11 +200,13 @@ export class Game {
 
   setMuted(muted: boolean) {
     this.sfx.muted = muted;
+    this.syncMusic();
     this.emit();
   }
 
   toggleMuted() {
     this.sfx.muted = !this.sfx.muted;
+    this.syncMusic();
     this.emit();
     return this.sfx.muted;
   }
@@ -243,6 +247,7 @@ export class Game {
     this.vx = 0;
     this.vy = 0;
     this.beginWave();
+    this.syncMusic();
     this.emit();
   }
 
@@ -254,12 +259,14 @@ export class Game {
     this.enemies = [];
     this.bullets = [];
     this.pickups = [];
+    this.sfx.stopMusic();
     this.emit();
   }
 
   pause(v?: boolean) {
     if (this.status !== "play") return;
     this.paused = v ?? !this.paused;
+    this.syncMusic();
     this.emit();
   }
 
@@ -587,8 +594,11 @@ export class Game {
         e.cool -= dt;
         if (e.cool <= 0) {
           e.cool = Math.max(0.55, 1.2 - ord * 0.06);
-          this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
-          if (ord >= 2) this.shootAim(e.x, e.y, 230);
+          if (this.theater === "night") this.shootAimFan(e.x, e.y, 4, 0.22, 200 + ord * 8);
+          else {
+            this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
+            if (ord >= 2) this.shootAim(e.x, e.y, 230);
+          }
         }
       }
       return;
@@ -633,37 +643,87 @@ export class Game {
 
   private tickHorde(e: Enemy, dt: number) {
     const dx = this.player.x - e.x;
-    const step = dx === 0 ? 0 : dx > 0 ? 1 : -1;
-    if (e.kind === "dart") {
-      e.x += step * (150 + this.wave * 6) * dt;
-      e.y += (140 + this.wave * 8) * dt;
-    } else if (e.kind === "tank") {
-      e.x += step * 40 * dt;
-      e.y += (34 + this.wave * 2) * dt;
-      e.cool -= dt;
-      if (e.cool <= 0 && e.y > 16 && e.y < this.h * 0.8) {
-        e.cool = 2.2;
-        this.bullets.push({
-          x: e.x,
-          y: e.y + e.r,
-          vx: clamp(dx, -70, 70),
-          vy: 150,
-          r: 6,
-          friendly: false,
-          life: 4,
-          dmg: 1,
-        });
-      }
-    } else {
-      e.x += step * (52 + this.wave * 2) * dt;
-      e.y += (50 + this.wave * 3) * dt;
-      e.x += Math.sin(e.t * 2.2 + e.seed) * 18 * dt;
+    const dy = this.player.y - e.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const prefer = e.kind === "dart" ? 148 : e.kind === "tank" ? 248 : 198;
+    const slack = e.kind === "dart" ? 34 : e.kind === "tank" ? 58 : 46;
+    const speed = e.kind === "dart" ? 156 + this.wave * 4 : e.kind === "tank" ? 46 : 68 + this.wave * 2;
+    let nx = (e.x - this.player.x) / dist;
+    let ny = (e.y - this.player.y) / dist;
+    if (ny > -0.35) {
+      ny = -0.75;
+      const len = Math.hypot(nx, ny) || 1;
+      nx /= len;
+      ny /= len;
     }
-    if (e.y > this.h + 56 || e.x < -70 || e.x > this.w + 70) e.alive = false;
+    const goalX = clamp(this.player.x + nx * prefer, 28, this.w - 28);
+    const goalY = clamp(this.player.y + ny * prefer, 36, this.h * 0.56);
+    const gx = goalX - e.x;
+    const gy = goalY - e.y;
+    const gd = Math.hypot(gx, gy) || 1;
+    if (dist < prefer - slack) {
+      e.x -= (dx / dist) * speed * dt;
+      e.y -= (dy / dist) * speed * dt;
+    } else if (gd > 18 && dist > prefer + slack) {
+      e.x += (gx / gd) * speed * dt;
+      e.y += (gy / gd) * speed * dt;
+    } else {
+      const side = Math.sin(e.t * 1.35 + e.seed) >= 0 ? 1 : -1;
+      e.x += (-dy / dist) * side * speed * 0.72 * dt;
+      e.y += (dx / dist) * side * speed * 0.28 * dt;
+      e.x += (gx / gd) * speed * 0.22 * dt;
+      e.y += (gy / gd) * speed * 0.22 * dt;
+    }
+    e.x = clamp(e.x, 20, this.w - 20);
+    e.y = clamp(e.y, 28, this.h * 0.7);
+    this.rangedAttack(e, dt, dist);
+  }
+
+  private rangedAttack(e: Enemy, dt: number, dist: number) {
+    e.cool -= dt;
+    if (e.cool > 0 || e.y < 12 || dist > 460) return;
+    if (e.kind === "tank") {
+      e.cool = 1.85;
+      this.shootAimFan(e.x, e.y, 3, 0.26, 145);
+      return;
+    }
+    if (e.kind === "dart") {
+      e.cool = 0.78;
+      this.shootAim(e.x, e.y, 270);
+      return;
+    }
+    e.cool = 1.35;
+    this.shootAim(e.x, e.y, 175);
+  }
+
+  private syncMusic() {
+    if (this.sfx.muted || this.status !== "play" || this.paused) {
+      this.sfx.pauseMusic();
+      return;
+    }
+    this.sfx.playTrack(this.theater === "night" ? "night" : "space");
   }
 
   private bossTitle(kind: QuizKind) {
     return this.theater === "night" ? "屍王" : bossName(kind);
+  }
+
+  private shootAimFan(x: number, y: number, count: number, spread: number, speed: number) {
+    const mid = Math.atan2(this.player.y - y, this.player.x - x);
+    for (let i = 0; i < count; i++) {
+      if (this.bullets.length > 110) return;
+      const a = mid + (i - (count - 1) / 2) * spread;
+      this.bullets.push({
+        x,
+        y,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        r: 5.2,
+        friendly: false,
+        life: 4.5,
+        dmg: 1,
+      });
+    }
   }
 
   private shootFan(x: number, y: number, count: number, spread: number, speed: number) {
@@ -886,6 +946,7 @@ export class Game {
       this.status = "over";
       this.question = null;
       this.built = null;
+      this.sfx.stopMusic();
       this.sfx.boom(true);
     }
     this.emit();
@@ -1413,6 +1474,8 @@ export class Game {
       maxHp: () => this.liveBoss()?.maxHp ?? 0,
       bossAlive: () => Boolean(this.liveBoss()),
       wave: () => this.wave,
+      hostile: () => this.bullets.filter((b) => !b.friendly).length,
+      music: () => this.sfx.playing(),
     };
   }
 }
