@@ -38,6 +38,7 @@ type Enemy = {
   seed: number;
   alive: boolean;
   entered: boolean;
+  hold: number;
 };
 
 type Bullet = {
@@ -50,9 +51,19 @@ type Bullet = {
   friendly: boolean;
   life: number;
   dmg: number;
+  grazed?: boolean;
 };
 
 type PickupKind = "spread" | "shield" | "speed";
+
+type Craft = {
+  kind: Kind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  gap: number;
+};
 
 type Pickup = { kind: PickupKind; x: number; y: number; life: number; r: number };
 
@@ -96,6 +107,9 @@ declare global {
       hostile: () => number;
       music: () => boolean;
       bed: () => string | null;
+      waveName: () => string;
+      phase: () => number;
+      foes: () => string;
     };
   }
 }
@@ -144,6 +158,14 @@ export class Game {
   private powSpeed = 0;
   private powShield = 0;
   private shieldHits = 0;
+  private stockSpread = 0;
+  private stockSpeed = 0;
+  private stockShield = 0;
+  private graze = 0;
+  private grazeReady = false;
+  private gateAt = 0;
+  private waveName = "";
+  private queue: Craft[] = [];
   private shake = 0;
   private hurtFlash = 0;
   private banner = "";
@@ -238,6 +260,14 @@ export class Game {
     this.powSpeed = 0;
     this.powShield = 0;
     this.shieldHits = 0;
+    this.stockSpread = 0;
+    this.stockSpeed = 0;
+    this.stockShield = 0;
+    this.graze = 0;
+    this.grazeReady = false;
+    this.gateAt = 0;
+    this.waveName = "";
+    this.queue = [];
     this.shake = 0;
     this.hurtFlash = 0;
     this.hitStop = 0;
@@ -285,7 +315,7 @@ export class Game {
   setPointer(x: number, y: number, on: boolean) {
     this.px = x;
     this.py = y;
-    this.pointerOn = on && this.status === "play" && !this.paused && !this.question;
+    this.pointerOn = on && this.status === "play" && !this.paused;
   }
 
   onKeyDown(e: KeyboardEvent) {
@@ -299,6 +329,20 @@ export class Game {
     if (this.question && !this.paused && /^Digit[1-4]$/.test(e.code) && !e.repeat) {
       this.answer(Number(e.code.slice(5)) - 1);
       return;
+    }
+    if (!e.repeat && this.status === "play" && !this.paused && !this.question) {
+      if (e.code === "KeyZ") {
+        this.usePower("spread");
+        return;
+      }
+      if (e.code === "KeyX") {
+        this.usePower("shield");
+        return;
+      }
+      if (e.code === "KeyC") {
+        this.usePower("speed");
+        return;
+      }
     }
     this.keys.add(e.code);
     if (
@@ -327,9 +371,10 @@ export class Game {
     this.time += dt;
     this.driftStars(dt);
     this.decayJuice(dt);
-    if (this.status === "play" && !this.paused && !this.question) {
-      if (this.hitStop > 0) this.hitStop -= dt;
-      else this.step(dt);
+    if (this.status === "play" && !this.paused) {
+      const scale = this.question ? 0.5 : 1;
+      if (this.hitStop > 0) this.hitStop -= dt * scale;
+      else this.step(dt * scale);
     }
     if (this.status === "play") this.syncMusic();
     this.draw(ctx);
@@ -352,17 +397,22 @@ export class Game {
   }
 
   private beginWave() {
+    this.queue = [];
     this.spawningBoss = this.wave % 3 === 0;
     if (this.spawningBoss) {
       this.leftToSpawn = 1;
       this.spawnGap = 0.65;
+      this.waveName = this.theater === "night" ? "屍王" : "首領";
       this.banner = this.theater === "night" ? "屍王進場" : "首領進場";
     } else {
-      this.leftToSpawn = this.theater === "night" ? Math.min(16, 6 + this.wave) : Math.min(12, 4 + this.wave);
-      this.spawnGap = 0.15;
-      this.banner = this.theater === "night" ? `屍潮 ${this.wave}` : `第 ${this.wave} 波`;
+      const plan = this.formationPlan();
+      this.queue = plan.crafts;
+      this.leftToSpawn = plan.crafts.length;
+      this.spawnGap = 0.12;
+      this.waveName = plan.title;
+      this.banner = plan.title;
     }
-    this.bannerT = 1.5;
+    this.bannerT = 1.6;
     this.clearHold = 0;
   }
 
@@ -373,11 +423,15 @@ export class Game {
     this.spawnGap -= dt;
     if (this.leftToSpawn > 0 && this.spawnGap <= 0) {
       const alive = this.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
-      if (this.spawningBoss || alive < (this.theater === "night" ? 9 : 7)) {
-        if (this.spawningBoss) this.spawnBoss();
-        else this.spawnMinion();
-        this.leftToSpawn -= 1;
-        this.spawnGap = this.spawningBoss ? 0 : 0.46;
+      if (this.spawningBoss) {
+        this.spawnBoss();
+        this.leftToSpawn = 0;
+        this.spawnGap = 0;
+      } else if (this.queue.length > 0 && alive < 10) {
+        const craft = this.queue.shift()!;
+        this.spawnCraft(craft, 0.9);
+        this.leftToSpawn = this.queue.length;
+        this.spawnGap = craft.gap;
       } else this.spawnGap = 0.18;
     }
     for (const e of this.enemies) if (e.alive) this.tickEnemy(e, dt);
@@ -396,10 +450,6 @@ export class Game {
     this.invuln = Math.max(0, this.invuln - dt);
     if (this.powSpread > 0) this.powSpread -= dt;
     if (this.powSpeed > 0) this.powSpeed -= dt;
-    if (this.powShield > 0) {
-      this.powShield -= dt;
-      if (this.powShield <= 0) this.shieldHits = 0;
-    }
     if (this.particles.length < 150 && Math.random() < 0.7) {
       this.particles.push({
         x: this.player.x - 4,
@@ -472,7 +522,8 @@ export class Game {
 
   private fire() {
     this.fireCd = this.powSpread > 0 ? 0.11 : 0.16;
-    const angles = this.powSpread > 0 ? [-0.36, -0.18, 0, 0.18, 0.36] : [0];
+    const wide = this.graze > 0.7 ? 1.28 : 1;
+    const angles = this.powSpread > 0 ? [-0.36, -0.18, 0, 0.18, 0.36].map((a) => a * wide) : [0];
     const noseY = this.player.y - 16;
     for (const a of angles) {
       if (this.bullets.length > 90) break;
@@ -493,61 +544,96 @@ export class Game {
     this.sfx.shoot();
   }
 
-  private spawnMinion() {
-    const roll = Math.random();
-    let kind: Kind = "grunt";
-    if (this.wave >= 2 && roll > 0.6) kind = "dart";
-    if (this.wave >= 4 && roll > 0.84) kind = "tank";
-    const fromLeft = Math.random() < 0.5;
+  private formationPlan(): { title: string; crafts: Craft[] } {
+    const tier = Math.floor((this.wave - 1) / 3);
+    const slot = (this.wave % 3) - 1;
+    const pattern = (tier * 2 + slot) % 5;
+    const n = 4 + Math.min(3, tier);
+    const titles = ["橫列推進", "兩翼夾擊", "後排封路", "慢隊帶路", "尖刃插入"];
+    const crafts: Craft[] = [];
+    const lane = (i: number, count: number) => {
+      const pad = 34;
+      return pad + ((this.w - pad * 2) * (i + 0.5)) / count;
+    };
+    if (pattern === 0) {
+      for (let i = 0; i < n; i++) {
+        crafts.push({ kind: "grunt", x: lane(i, n), y: -24 - (i % 2) * 18, vx: 0, vy: 62, gap: 0.16 });
+      }
+    } else if (pattern === 1) {
+      for (let i = 0; i < n; i++) {
+        const left = i % 2 === 0;
+        crafts.push({
+          kind: "dart",
+          x: left ? -20 : this.w + 20,
+          y: 36 + (i % 3) * 28,
+          vx: left ? 130 : -130,
+          vy: 36,
+          gap: 0.2,
+        });
+      }
+    } else if (pattern === 2) {
+      crafts.push({ kind: "tank", x: this.w * 0.32, y: -70, vx: 0, vy: 34, gap: 0.28 });
+      crafts.push({ kind: "tank", x: this.w * 0.68, y: -78, vx: 0, vy: 34, gap: 0.2 });
+      for (let i = 0; i < n - 1; i++) {
+        crafts.push({ kind: "grunt", x: lane(i, n - 1), y: -22, vx: 0, vy: 70, gap: 0.14 });
+      }
+    } else if (pattern === 3) {
+      const lead = Math.max(3, n - 2);
+      for (let i = 0; i < lead; i++) {
+        crafts.push({ kind: "grunt", x: lane(i, lead), y: -20, vx: 0, vy: 48, gap: 0.16 });
+      }
+      crafts.push({ kind: "dart", x: -20, y: 70, vx: 150, vy: 20, gap: 0.35 });
+      crafts.push({ kind: "dart", x: this.w + 20, y: 96, vx: -150, vy: 20, gap: 0.2 });
+    } else {
+      crafts.push({ kind: "dart", x: this.w / 2, y: -28, vx: 0, vy: 110, gap: 0.22 });
+      const wings = Math.max(2, n - 1);
+      for (let i = 0; i < wings; i++) {
+        const left = i % 2 === 0;
+        crafts.push({
+          kind: i > 2 ? "tank" : "grunt",
+          x: left ? this.w * 0.28 : this.w * 0.72,
+          y: -36 - Math.floor(i / 2) * 22,
+          vx: left ? 24 : -24,
+          vy: 64,
+          gap: 0.16,
+        });
+      }
+    }
+    return { title: titles[pattern] ?? "橫列推進", crafts };
+  }
+
+  private spawnCraft(craft: Craft, hold: number) {
     const night = this.theater === "night";
+    const kind = craft.kind;
+    const hp = night
+      ? kind === "tank"
+        ? 8 + Math.floor(this.wave / 2)
+        : kind === "dart"
+          ? 2
+          : 2 + Math.floor((this.wave - 1) / 4)
+      : kind === "tank"
+        ? 4 + Math.floor(this.wave / 3)
+        : 1 + Math.floor((this.wave - 1) / 5);
     const enemy: Enemy = {
       kind,
-      x: kind === "dart" ? (fromLeft ? -24 : this.w + 24) : 36 + Math.random() * (this.w - 72),
-      y: kind === "dart" ? 50 + Math.random() * this.h * 0.22 : -28,
-      vx: kind === "dart" ? (fromLeft ? 150 : -150) : 0,
-      vy: night
-        ? kind === "tank"
-          ? 36
-          : kind === "dart"
-            ? 150
-            : 56
-        : kind === "tank"
-          ? 40 + this.wave * 3
-          : kind === "dart"
-            ? 90 + this.wave * 6
-            : 58 + this.wave * 5,
-      hp: night
-        ? kind === "tank"
-          ? 8 + Math.floor(this.wave / 2)
-          : kind === "dart"
-            ? 2
-            : 2 + Math.floor((this.wave - 1) / 4)
-        : kind === "tank"
-          ? 4 + Math.floor(this.wave / 3)
-          : 1 + Math.floor((this.wave - 1) / 5),
-      maxHp: 1,
-      r: night
-        ? kind === "tank"
-          ? 26
-          : kind === "dart"
-            ? 16
-            : 18
-        : kind === "tank"
-          ? 22
-          : kind === "dart"
-            ? 13
-            : 15,
+      x: craft.x,
+      y: craft.y,
+      vx: craft.vx,
+      vy: craft.vy,
+      hp,
+      maxHp: hp,
+      r: night ? (kind === "tank" ? 26 : kind === "dart" ? 16 : 18) : kind === "tank" ? 22 : kind === "dart" ? 13 : 15,
       t: 0,
       phase: 0,
-      cool: 0.8 + Math.random() * 1.2,
+      cool: 0.55 + Math.random() * 0.4,
       flash: 0,
       locked: false,
       quiz: "word",
       seed: Math.random() * 6,
       alive: true,
       entered: true,
+      hold,
     };
-    enemy.maxHp = enemy.hp;
     this.enemies.push(enemy);
   }
 
@@ -579,6 +665,7 @@ export class Game {
       seed: 0,
       alive: true,
       entered: false,
+      hold: 0,
     });
     this.banner = `${this.bossTitle(quiz)} · 血線鎖盾`;
     this.bannerT = 1.8;
@@ -597,15 +684,15 @@ export class Game {
         e.x = this.w / 2 + Math.sin(e.t * (0.65 + ord * 0.04)) * this.w * 0.28;
         e.y = 116 + Math.sin(e.t * 1.15) * 20;
         e.cool -= dt;
-        if (e.cool <= 0) {
-          e.cool = Math.max(0.55, 1.2 - ord * 0.06);
-          if (this.theater === "night") this.launchAt(e.x, e.y, 250 + ord * 12, 90, 0.09, 3, 4.4);
-          else {
-            this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
-            if (ord >= 2) this.shootAim(e.x, e.y, 230);
-          }
-        }
+        if (e.locked || e.cool > 0) return;
+        this.bossVolley(e);
       }
+      return;
+    }
+    if (e.hold > 0) {
+      e.hold -= dt;
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
       return;
     }
     if (this.theater === "night") {
@@ -709,6 +796,47 @@ export class Game {
     }
     const bed = this.liveBoss() ? "boss" : this.theater === "night" ? "night" : "space";
     this.sfx.playBed(bed, Boolean(this.question));
+  }
+
+  private bossVolley(e: Enemy) {
+    const ord = Math.max(1, this.wave / 3);
+    if (e.phase <= 0) {
+      e.cool = Math.max(0.55, 1.15 - ord * 0.05);
+      if (this.theater === "night") this.launchAt(e.x, e.y, 250 + ord * 12, 90, 0.09, 3, 4.4);
+      else {
+        this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
+        if (ord >= 2) this.shootAim(e.x, e.y, 230);
+      }
+      return;
+    }
+    if (e.phase === 1) {
+      e.cool = 0.58;
+      this.launchAt(e.x, e.y, 300 + ord * 8, this.theater === "night" ? 40 : 0, 0.1, 3, 4);
+      return;
+    }
+    e.cool = 0.82;
+    this.launchAt(e.x, e.y, 240 + ord * 8, this.theater === "night" ? 70 : 0, 0.16, 5, 4.2);
+  }
+
+  private summonRing() {
+    const boss = this.liveBoss();
+    if (!boss) return;
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const a = Math.PI * 0.2 + (i / (n - 1)) * Math.PI * 0.6;
+      const kind: Kind = i % 3 === 0 ? "dart" : "grunt";
+      this.spawnCraft(
+        {
+          kind,
+          x: clamp(boss.x + Math.cos(a) * 86, 28, this.w - 28),
+          y: boss.y + 28 + Math.sin(a) * 18,
+          vx: Math.cos(a) * 36,
+          vy: 46,
+          gap: 0,
+        },
+        0.45,
+      );
+    }
   }
 
   private bossTitle(kind: QuizKind) {
@@ -857,7 +985,7 @@ export class Game {
       } else if (this.invuln <= 0 && this.hit(b.x, b.y, b.r, this.player.x, this.player.y, this.player.r)) {
         b.life = 0;
         this.hurtPlayer();
-      }
+      } else if (!b.friendly) this.noteGraze(b);
     }
     if (this.invuln <= 0) {
       for (const e of this.enemies) {
@@ -876,6 +1004,27 @@ export class Game {
         p.life = 0;
         this.takePickup(p);
       }
+    }
+  }
+
+  private noteGraze(b: Bullet) {
+    if (b.grazed || this.question) return;
+    const dx = b.x - this.player.x;
+    const dy = b.y - this.player.y;
+    const dist = Math.hypot(dx, dy);
+    const near = this.player.r + b.r + 26;
+    const far = this.player.r + b.r + 4;
+    if (dist > near || dist < far) return;
+    b.grazed = true;
+    this.score += 20;
+    this.graze = Math.min(1, this.graze + 0.17);
+    this.burst(b.x, b.y, PAL.amber, 3);
+    if (this.graze >= 1 && !this.grazeReady) {
+      this.grazeReady = true;
+      this.graze = 1;
+      this.banner = "擦彈就緒";
+      this.bannerT = 0.9;
+      this.float(this.player.x, this.player.y - 24, "就緒", PAL.amber);
     }
   }
 
@@ -923,7 +1072,13 @@ export class Game {
       wrong: false,
     };
     this.pointerOn = false;
+    this.gateAt = this.time;
     this.sfx.shield();
+    if (this.grazeReady) {
+      this.grazeReady = false;
+      this.graze = 0;
+      this.clearField();
+    }
     this.emit();
   }
 
@@ -942,6 +1097,7 @@ export class Game {
       bossName: this.bossTitle(kind),
       wrong: true,
     };
+    this.gateAt = this.time;
     this.shake = this.reduce ? 0 : 0.7;
     this.sfx.bad();
     this.emit();
@@ -949,17 +1105,33 @@ export class Game {
 
   private solveGate() {
     const boss = this.liveBoss();
+    const fast = this.time - this.gateAt < 4.2;
     this.built = null;
     this.question = null;
     this.score += 480;
     if (boss) {
       boss.locked = false;
       boss.phase += 1;
-      this.float(boss.x, boss.y - 30, "解鎖 +480", PAL.amber);
+      let note = boss.phase === 1 ? "預判連射" : "外環壓上";
+      if (fast) {
+        const chunk = Math.max(8, Math.round(boss.maxHp * 0.08));
+        const nextLine = boss.phase < PHASES.length ? boss.maxHp * PHASES[boss.phase]! : 1;
+        boss.hp = Math.max(nextLine, boss.hp - chunk);
+        this.score += 220;
+        note = `手快 · ${note}`;
+        this.float(boss.x, boss.y - 48, `-${chunk}`, PAL.amber);
+      }
+      if (boss.phase >= 2) this.summonRing();
+      if (boss.hp <= 1 && boss.phase >= PHASES.length) {
+        boss.hp = 0;
+        this.killEnemy(boss);
+        return;
+      }
+      this.float(boss.x, boss.y - 28, "解鎖 +480", PAL.amber);
       this.burst(boss.x, boss.y, PAL.amber, 16);
-    }
-    this.banner = "護盾解開，繼續輸出";
-    this.bannerT = 1.25;
+      this.banner = note;
+    } else this.banner = "護盾解開";
+    this.bannerT = 1.35;
     this.sfx.good();
     this.emit();
   }
@@ -1013,16 +1185,45 @@ export class Game {
   }
 
   private takePickup(p: Pickup) {
-    if (p.kind === "spread") this.powSpread = 9;
-    if (p.kind === "speed") this.powSpeed = 9;
-    if (p.kind === "shield") {
-      this.shieldHits = Math.min(2, this.shieldHits + 1);
-      this.powShield = 10;
-    }
+    if (p.kind === "spread") this.stockSpread = Math.min(3, this.stockSpread + 1);
+    if (p.kind === "speed") this.stockSpeed = Math.min(3, this.stockSpeed + 1);
+    if (p.kind === "shield") this.stockShield = Math.min(3, this.stockShield + 1);
     this.sfx.pickup();
-    const label = p.kind === "spread" ? "散彈" : p.kind === "speed" ? "加速" : "護盾";
+    const label = p.kind === "spread" ? "散彈入庫" : p.kind === "speed" ? "加速入庫" : "護盾入庫";
     this.float(p.x, p.y - 10, label, PAL.amber);
     this.emit();
+  }
+
+  usePower(kind: PickupKind) {
+    if (this.status !== "play" || this.paused || this.question) return;
+    if (kind === "spread" && this.stockSpread > 0) {
+      this.stockSpread -= 1;
+      this.powSpread = 8;
+      this.float(this.player.x, this.player.y - 28, "散彈", PAL.amber);
+    } else if (kind === "speed" && this.stockSpeed > 0) {
+      this.stockSpeed -= 1;
+      this.powSpeed = 8;
+      this.float(this.player.x, this.player.y - 28, "加速", PAL.cyan);
+    } else if (kind === "shield" && this.stockShield > 0 && this.shieldHits <= 0) {
+      this.stockShield -= 1;
+      this.shieldHits = 2;
+      this.float(this.player.x, this.player.y - 28, "護盾", PAL.cyan);
+      this.sfx.shield();
+    } else return;
+    if (kind !== "shield") this.sfx.pickup();
+    this.emit();
+  }
+
+  private clearField() {
+    for (const b of this.bullets) if (!b.friendly) b.life = 0;
+    for (const e of this.enemies) {
+      if (e.alive && e.kind !== "boss") this.damageEnemy(e, 3);
+    }
+    this.burst(this.player.x, this.player.y, PAL.amber, 18);
+    this.score += 120;
+    this.banner = "擦彈清屏";
+    this.bannerT = 1.1;
+    this.float(this.player.x, this.player.y - 36, "清屏", PAL.amber);
   }
 
   private drop(x: number, y: number) {
@@ -1472,6 +1673,7 @@ export class Game {
       score: this.score,
       lives: this.lives,
       wave: this.wave,
+      waveName: this.waveName,
       theater: this.theater,
       boss: boss
         ? {
@@ -1487,7 +1689,12 @@ export class Game {
         speed: Math.max(0, this.powSpeed),
         shield: Math.max(0, this.powShield),
         shieldHits: this.shieldHits,
+        spreadStock: this.stockSpread,
+        speedStock: this.stockSpeed,
+        shieldStock: this.stockShield,
       },
+      graze: this.graze,
+      grazeReady: this.grazeReady,
       question: this.question,
       muted: this.sfx.muted,
     };
@@ -1553,6 +1760,13 @@ export class Game {
       hostile: () => this.bullets.filter((b) => !b.friendly).length,
       music: () => this.sfx.playing(),
       bed: () => this.sfx.bed(),
+      waveName: () => this.waveName,
+      phase: () => this.liveBoss()?.phase ?? -1,
+      foes: () =>
+        this.enemies
+          .filter((e) => e.alive)
+          .map((e) => `${e.kind}:${Math.round(e.x)},${Math.round(e.y)}`)
+          .join(" "),
     };
   }
 }

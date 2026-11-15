@@ -41,6 +41,7 @@ export type Snap = {
   score: number;
   lives: number;
   wave: number;
+  waveName: string;
   theater: Theater;
   boss: null | {
     name: string;
@@ -49,7 +50,17 @@ export type Snap = {
     quiz: QuizKind;
     locked: boolean;
   };
-  powers: { spread: number; speed: number; shield: number; shieldHits: number };
+  powers: {
+    spread: number;
+    speed: number;
+    shield: number;
+    shieldHits: number;
+    spreadStock: number;
+    speedStock: number;
+    shieldStock: number;
+  };
+  graze: number;
+  grazeReady: boolean;
   question: PublicQuestion | null;
   muted: boolean;
 };

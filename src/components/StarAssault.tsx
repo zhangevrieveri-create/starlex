@@ -327,7 +327,7 @@ export function StarAssault() {
               </div>
               <p className="mt-2 font-display text-2xl font-semibold text-fg">{formatScore(snap.score)}</p>
               <p className="text-sm text-muted">
-                第 {snap.wave} 波{snap.boss ? ` · ${snap.boss.name}` : ""}
+                第 {snap.wave} 波 · {snap.boss ? snap.boss.name : snap.waveName}
               </p>
             </div>
             <button
@@ -359,6 +359,12 @@ export function StarAssault() {
               </div>
             </div>
           )}
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-2" aria-label="擦彈">
+              <div className="h-full bg-accent" style={{ width: `${Math.round(snap.graze * 100)}%` }} />
+            </div>
+            <span className="text-xs text-muted">{snap.grazeReady ? "擦彈就緒" : "擦彈"}</span>
+          </div>
           <div className="mt-2 flex flex-wrap gap-2">
             {snap.powers.spread > 0 && (
               <Chip>
@@ -382,36 +388,34 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "拖曳或 WASD 移動，步槍會自己開火。喪屍會預判走位，酸液走弧線，換方向才能躲開。"
-            : "拖曳或 WASD 移動，攔截機會自己對準上方開火。撿到散、盾、速會短時間強化。"}
+            ? "WASD 移動。這一波的陣型會寫在上面。Z 散彈、X 護盾、C 加速，撿到先存著，自己決定何時按。"
+            : "WASD 移動。敵艦按陣型進來。Z 散彈、X 護盾、C 加速，撿到不會自己倒數。"}
         </p>
       )}
 
       {question && (
-        <div className="absolute inset-0 z-20 flex items-end justify-center bg-bg/75 p-4 sm:items-center safe-top safe-bottom">
+        <div className="pointer-events-none absolute inset-x-0 top-28 z-20 flex justify-center px-3">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="quiz-prompt"
-            className="w-full max-w-md rounded-2xl border border-border bg-surface p-5"
+            className="pointer-events-auto w-full max-w-md rounded-2xl border border-border bg-surface/95 p-4"
           >
             <p className="font-display text-sm text-accent">
               {question.kind === "word" ? "單詞鎖" : "算式鎖"} · {question.bossName} · 第 {question.phase}/
               {question.phases} 道
             </p>
-            <h2 id="quiz-prompt" className="mt-3 break-words text-center font-display text-4xl font-bold text-fg">
+            <h2 id="quiz-prompt" className="mt-2 break-words text-center font-display text-3xl font-bold text-fg">
               {question.prompt}
             </h2>
-            <p className="mt-2 text-center text-sm text-muted">{question.hint}。答對才解除護盾。</p>
-            {question.wrong && (
-              <p className="mt-2 text-center text-sm text-danger">還沒解開。這題換新的，答對才能繼續打。</p>
-            )}
-            <div className="mt-4 grid gap-2">
+            <p className="mt-1 text-center text-sm text-muted">場面還在慢速走。答得快，解開時多扣一截。</p>
+            {question.wrong && <p className="mt-1 text-center text-sm text-danger">這題換新的。答對才繼續扣血。</p>}
+            <div className="mt-3 grid gap-2">
               {question.choices.map((choice, index) => (
                 <button
                   key={`${question.prompt}-${choice}-${index}`}
                   type="button"
-                  className="min-h-12 rounded-xl border border-border bg-bg px-4 text-left text-base text-fg"
+                  className="min-h-11 rounded-xl border border-border bg-bg px-4 text-left text-base text-fg"
                   onClick={() => gameRef.current?.answer(index)}
                 >
                   <span className="mr-3 font-display text-primary">{index + 1}</span>
@@ -420,6 +424,41 @@ export function StarAssault() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {screen === "play" && snap && !paused && !over && (
+        <div className="absolute inset-x-0 bottom-0 z-10 flex justify-start gap-2 px-3 pb-3 safe-bottom">
+          {(
+            [
+              ["spread", "散", "KeyZ"],
+              ["shield", "盾", "KeyX"],
+              ["speed", "速", "KeyC"],
+            ] as const
+          ).map(([kind, label]) => {
+            const stock =
+              kind === "spread"
+                ? snap.powers.spreadStock
+                : kind === "shield"
+                  ? snap.powers.shieldStock
+                  : snap.powers.speedStock;
+            const on =
+              kind === "spread"
+                ? snap.powers.spread > 0
+                : kind === "shield"
+                  ? snap.powers.shieldHits > 0
+                  : snap.powers.speed > 0;
+            return (
+              <button
+                key={kind}
+                type="button"
+                className={`pointer-events-auto min-h-11 min-w-14 rounded-xl border px-3 text-sm ${on ? "border-primary text-fg" : "border-border text-muted"} bg-surface/90`}
+                onClick={() => gameRef.current?.usePower(kind)}
+              >
+                {label} {stock}
+              </button>
+            );
+          })}
         </div>
       )}
 
