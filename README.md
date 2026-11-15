@@ -28,12 +28,10 @@ npm run dev
 
 瀏覽器打開終端機印出的位址（預設埠 8080）。
 
-## 裝到手機
+## 兩個連結，別弄混
 
-這是網頁，不是 App Store 安裝檔。部署或發布後用手機瀏覽器打開網址：
-
-- iPhone：Safari → 分享 → 加入主畫面
-- Android：Chrome → 安裝應用程式或加到主畫面
+- 程式碼（這個倉庫）：https://github.com/zhangevrieveri-create/starlex
+- 手機上玩：不要把上面的 GitHub 連結傳給朋友。GitHub 打開是程式，不是遊戲。要玩的話，用發布後的網頁網址。iPhone 用 Safari 打開那個網址 → 分享 → 加入主畫面。Android 用 Chrome → 安裝應用程式或加到主畫面。
 
 ## 許可
 
