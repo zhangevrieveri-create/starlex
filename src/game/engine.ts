@@ -45,6 +45,7 @@ type Bullet = {
   y: number;
   vx: number;
   vy: number;
+  ay: number;
   r: number;
   friendly: boolean;
   life: number;
@@ -380,6 +381,7 @@ export class Game {
     for (const e of this.enemies) if (e.alive) this.tickEnemy(e, dt);
     this.separate();
     for (const b of this.bullets) {
+      b.vy += b.ay * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
@@ -478,6 +480,7 @@ export class Game {
         y: noseY,
         vx: Math.cos(ang) * 640,
         vy: Math.sin(ang) * 640,
+        ay: 0,
         r: 3.2,
         friendly: true,
         life: 1.35,
@@ -594,7 +597,7 @@ export class Game {
         e.cool -= dt;
         if (e.cool <= 0) {
           e.cool = Math.max(0.55, 1.2 - ord * 0.06);
-          if (this.theater === "night") this.shootAimFan(e.x, e.y, 4, 0.22, 200 + ord * 8);
+          if (this.theater === "night") this.launchAt(e.x, e.y, 250 + ord * 12, 90, 0.09, 3, 4.4);
           else {
             this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
             if (ord >= 2) this.shootAim(e.x, e.y, 230);
@@ -628,6 +631,7 @@ export class Game {
           y: e.y + e.r,
           vx: 0,
           vy: 200 + this.wave * 4,
+          ay: 0,
           r: 4,
           friendly: false,
           life: 4,
@@ -683,17 +687,17 @@ export class Game {
     e.cool -= dt;
     if (e.cool > 0 || e.y < 12 || dist > 460) return;
     if (e.kind === "tank") {
-      e.cool = 1.85;
-      this.shootAimFan(e.x, e.y, 3, 0.26, 145);
+      e.cool = 1.9;
+      this.launchAt(e.x, e.y, 268, 460, 0.14, 3, 5.4);
       return;
     }
     if (e.kind === "dart") {
-      e.cool = 0.78;
-      this.shootAim(e.x, e.y, 270);
+      e.cool = 0.82;
+      this.launchAt(e.x, e.y, 390, 0, 0, 1, 3.3);
       return;
     }
-    e.cool = 1.35;
-    this.shootAim(e.x, e.y, 175);
+    e.cool = 1.28;
+    this.launchAt(e.x, e.y, 310, 220, 0, 1, 4.2);
   }
 
   private syncMusic() {
@@ -708,19 +712,70 @@ export class Game {
     return this.theater === "night" ? "屍王" : bossName(kind);
   }
 
-  private shootAimFan(x: number, y: number, count: number, spread: number, speed: number) {
-    const mid = Math.atan2(this.player.y - y, this.player.x - x);
+  private solveShot(sx: number, sy: number, speed: number, gravity: number, lob: boolean) {
+    let guess = Math.hypot(this.player.x - sx, this.player.y - sy) / Math.max(speed, 40);
+    let best: { vx: number; vy: number; t: number } | null = null;
+    for (let n = 0; n < 3; n++) {
+      const tx = clamp(this.player.x + this.vx * guess, 22, this.w - 22);
+      const ty = clamp(this.player.y + this.vy * guess, 22, this.h - 22);
+      const dx = tx - sx;
+      const dy = ty - sy;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (gravity < 8) {
+        guess = dist / speed;
+        best = { vx: (dx / dist) * speed, vy: (dy / dist) * speed, t: guess };
+        continue;
+      }
+      const a = 0.25 * gravity * gravity;
+      const b = -(gravity * dy + speed * speed);
+      const c = dx * dx + dy * dy;
+      const disc = b * b - 4 * a * c;
+      if (disc < 0) {
+        guess = dist / speed;
+        best = { vx: (dx / dist) * speed, vy: (dy / dist) * speed, t: guess };
+        continue;
+      }
+      const root = Math.sqrt(disc);
+      const lo = (-b - root) / (2 * a);
+      const hi = (-b + root) / (2 * a);
+      const picks = [lo, hi].filter((u) => u > 0.04 * 0.04);
+      if (picks.length === 0) {
+        guess = dist / speed;
+        best = { vx: (dx / dist) * speed, vy: (dy / dist) * speed, t: guess };
+        continue;
+      }
+      const flight = Math.sqrt(lob ? Math.max(...picks) : Math.min(...picks));
+      guess = flight;
+      best = { vx: dx / flight, vy: dy / flight - 0.5 * gravity * flight, t: flight };
+    }
+    return best;
+  }
+
+  private launchAt(
+    x: number,
+    y: number,
+    speed: number,
+    gravity: number,
+    spread: number,
+    count: number,
+    radius: number,
+  ) {
+    const solved = this.solveShot(x, y, speed, gravity, gravity > 300);
+    if (!solved) return;
+    const base = Math.atan2(solved.vy, solved.vx);
     for (let i = 0; i < count; i++) {
       if (this.bullets.length > 110) return;
-      const a = mid + (i - (count - 1) / 2) * spread;
+      const off = count <= 1 ? 0 : (i - (count - 1) / 2) * spread;
+      const a = base + off;
       this.bullets.push({
         x,
         y,
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
-        r: 5.2,
+        ay: gravity,
+        r: radius,
         friendly: false,
-        life: 4.5,
+        life: 4.4,
         dmg: 1,
       });
     }
@@ -736,6 +791,7 @@ export class Game {
         y,
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
+        ay: 0,
         r: 4.2,
         friendly: false,
         life: 4.5,
@@ -752,6 +808,7 @@ export class Game {
       y,
       vx: Math.cos(ang) * speed,
       vy: Math.sin(ang) * speed,
+      ay: 0,
       r: 4.2,
       friendly: false,
       life: 4.5,
@@ -1351,20 +1408,36 @@ export class Game {
 
   private drawBullet(ctx: CanvasRenderingContext2D, b: Bullet) {
     const mag = Math.hypot(b.vx, b.vy) || 1;
-    const len = b.friendly ? 14 : 11;
     const night = this.theater === "night";
-    ctx.strokeStyle = b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? "#8dce6a" : PAL.rose;
-    ctx.lineWidth = b.friendly ? 3 : 2.6;
+    const lob = b.ay > 8;
+    const len = b.friendly ? 14 : lob ? 16 : 11;
+    ctx.strokeStyle = b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? (lob ? "#c6f59a" : "#8dce6a") : PAL.rose;
+    ctx.lineWidth = b.friendly ? 3 : lob ? 4.2 : 2.6;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(b.x, b.y);
     ctx.lineTo(b.x - (b.vx / mag) * len, b.y - (b.vy / mag) * len);
     ctx.stroke();
-    if (b.friendly) {
-      ctx.fillStyle = "#ffffff";
+    if (b.friendly || lob) {
+      ctx.fillStyle = b.friendly ? "#ffffff" : "#e7ffc4";
       ctx.beginPath();
-      ctx.arc(b.x, b.y, 1.6, 0, Math.PI * 2);
+      ctx.arc(b.x, b.y, b.friendly ? 1.6 : b.r * 0.72, 0, Math.PI * 2);
       ctx.fill();
+    }
+    if (lob) {
+      let x = b.x;
+      let y = b.y;
+      let vy = b.vy;
+      for (let i = 1; i <= 7; i++) {
+        vy += b.ay * 0.07;
+        x += b.vx * 0.07;
+        y += vy * 0.07;
+        ctx.globalAlpha = 0.45 - i * 0.05;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(1.2, b.r * 0.45 - i * 0.3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     }
   }
 

@@ -382,7 +382,7 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "拖曳或 WASD 移動，步槍會自己開火。喪屍會拉開距離遠攻，別站著吃酸。"
+            ? "拖曳或 WASD 移動，步槍會自己開火。喪屍會預判走位，酸液走弧線，換方向才能躲開。"
             : "拖曳或 WASD 移動，攔截機會自己對準上方開火。撿到散、盾、速會短時間強化。"}
         </p>
       )}
