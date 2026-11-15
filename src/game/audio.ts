@@ -1,8 +1,9 @@
-export type MusicId = "space" | "night";
+export type MusicId = "space" | "night" | "boss";
 
 const TRACKS: Record<MusicId, string> = {
   space: "/music/space.mp3",
   night: "/music/night.mp3",
+  boss: "/music/boss.mp3",
 };
 
 export class Sfx {
@@ -21,20 +22,31 @@ export class Sfx {
     void this.ctx.resume();
   }
 
-  playTrack(id: MusicId) {
-    if (this.muted) return;
-    this.unlock();
-    if (this.track === id && this.music) {
-      if (this.music.paused) void this.music.play().catch(() => {});
+  playBed(id: MusicId | null, duck: boolean) {
+    if (!id || this.muted) {
+      this.pauseMusic();
       return;
     }
-    this.stopMusic();
-    const audio = new Audio(TRACKS[id]);
-    audio.loop = true;
-    audio.volume = 0.32;
-    this.music = audio;
-    this.track = id;
-    void audio.play().catch(() => {});
+    this.unlock();
+    if (!this.music) {
+      this.music = new Audio();
+      this.music.loop = true;
+      this.music.preload = "auto";
+    }
+    const vol = duck ? 0.16 : 0.46;
+    if (this.music.volume !== vol) this.music.volume = vol;
+    if (this.track !== id) {
+      this.track = id;
+      this.music.src = TRACKS[id];
+      this.music.loop = true;
+      void this.music.play().catch(() => {});
+      return;
+    }
+    if (this.music.paused) void this.music.play().catch(() => {});
+  }
+
+  bed() {
+    return this.track;
   }
 
   pauseMusic() {

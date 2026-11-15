@@ -95,6 +95,7 @@ declare global {
       wave: () => number;
       hostile: () => number;
       music: () => boolean;
+      bed: () => string | null;
     };
   }
 }
@@ -330,6 +331,7 @@ export class Game {
       if (this.hitStop > 0) this.hitStop -= dt;
       else this.step(dt);
     }
+    if (this.status === "play") this.syncMusic();
     this.draw(ctx);
     if (this.status === "play") {
       this.uiAcc += dt;
@@ -702,10 +704,11 @@ export class Game {
 
   private syncMusic() {
     if (this.sfx.muted || this.status !== "play" || this.paused) {
-      this.sfx.pauseMusic();
+      this.sfx.playBed(null, false);
       return;
     }
-    this.sfx.playTrack(this.theater === "night" ? "night" : "space");
+    const bed = this.liveBoss() ? "boss" : this.theater === "night" ? "night" : "space";
+    this.sfx.playBed(bed, Boolean(this.question));
   }
 
   private bossTitle(kind: QuizKind) {
@@ -1549,6 +1552,7 @@ export class Game {
       wave: () => this.wave,
       hostile: () => this.bullets.filter((b) => !b.friendly).length,
       music: () => this.sfx.playing(),
+      bed: () => this.sfx.bed(),
     };
   }
 }
