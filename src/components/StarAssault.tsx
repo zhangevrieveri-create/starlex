@@ -18,9 +18,14 @@ import {
 import { Game } from "@/game/engine";
 import { DEFAULT_WORDS, newWordId } from "@/game/lexicon";
 import { formatScore, freshSave, loadSave, pushScore, sanitizeWords, writeSave } from "@/game/storage";
-import type { ChallengeMode, Save, Snap } from "@/game/types";
+import type { ChallengeMode, Save, Snap, Theater } from "@/game/types";
 
 type Screen = "menu" | "play" | "lexicon" | "scores" | "install";
+
+const THEATERS: { id: Theater; label: string; copy: string }[] = [
+  { id: "space", label: "星域", copy: "駕駛新的攔截機。敵艦會開火，首領掉到血線就鎖盾。" },
+  { id: "night", label: "喪屍夜", copy: "換成倖存者。屍群只會撲過來，屍王一樣要答對才能繼續扣血。" },
+];
 
 const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
   { id: "mix", label: "混合", copy: "第 1、3、5… 隻首領考單詞，雙數考百以內加減。" },
@@ -54,6 +59,7 @@ export function StarAssault() {
     setSave(loaded);
     game.setWords(loaded.words);
     game.setMode(loaded.mode);
+    game.setTheater(loaded.theater);
     game.setMuted(loaded.muted);
     const unsub = game.subscribe(setSnap);
 
@@ -122,6 +128,7 @@ export function StarAssault() {
     writeSave(next);
     gameRef.current?.setWords(next.words);
     gameRef.current?.setMode(next.mode);
+    gameRef.current?.setTheater(next.theater);
     gameRef.current?.setMuted(next.muted);
   }
 
@@ -130,6 +137,7 @@ export function StarAssault() {
     if (!game) return;
     game.setWords(save.words);
     game.setMode(save.mode);
+    game.setTheater(save.theater);
     game.setMuted(save.muted);
     game.start();
     setSavedScore(false);
@@ -157,6 +165,7 @@ export function StarAssault() {
   }
 
   const mode = MODES.find((m) => m.id === save.mode) ?? MODES[0]!;
+  const theater = THEATERS.find((t) => t.id === save.theater) ?? THEATERS[0]!;
   const over = screen === "play" && snap?.status === "over";
   const paused = screen === "play" && Boolean(snap?.paused) && !over;
   const question = screen === "play" && snap?.question && !paused && !over ? snap.question : null;
@@ -192,14 +201,50 @@ export function StarAssault() {
             <div className="rounded-2xl border border-border bg-surface/90 p-6">
               <p className="font-display text-sm tracking-widest text-primary">俯視答題射擊</p>
               <h1 className="mt-2 font-display text-5xl font-bold text-fg">星詞突擊</h1>
+              <div
+                className="mx-auto mt-4 h-28 w-28 bg-no-repeat"
+                style={{
+                  backgroundImage: `url(${save.theater === "night" ? "/sprites/survivor.png" : "/sprites/ship.png"})`,
+                  backgroundSize: "200% 200%",
+                  backgroundPosition: "0% 0%",
+                }}
+                aria-hidden="true"
+              />
               <p className="mt-3 text-base leading-relaxed text-muted">
-                小兵直接打掉。首領血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血、開往下一波。
+                {save.theater === "night"
+                  ? "屍群從街口撲下來。小兵直接打。屍王血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血。"
+                  : "小兵直接打掉。首領血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血、開往下一波。"}
               </p>
               {best && (
                 <p className="mt-4 text-sm text-accent">
                   本機最高 {formatScore(best.score)} · {best.name}
                 </p>
               )}
+            </div>
+
+            <div>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="戰場">
+                {THEATERS.map((item) => {
+                  const on = save.theater === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      className={
+                        on
+                          ? "min-h-11 rounded-xl bg-primary px-2 font-display text-base font-semibold text-bg"
+                          : "min-h-11 rounded-xl border border-border bg-surface px-2 font-display text-base text-muted"
+                      }
+                      onClick={() => commit({ ...save, theater: item.id })}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-sm text-muted">{theater.copy}</p>
             </div>
 
             <div>
@@ -336,7 +381,9 @@ export function StarAssault() {
 
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
-          拖曳或 WASD 移動，船會自己對準上方開火。撿到散、盾、速會短時間強化。
+          {save.theater === "night"
+            ? "拖曳或 WASD 移動，步槍會自己開火。屍群靠過來就躲開，壯屍會吐酸。"
+            : "拖曳或 WASD 移動，攔截機會自己對準上方開火。撿到散、盾、速會短時間強化。"}
         </p>
       )}
 
@@ -413,7 +460,7 @@ export function StarAssault() {
       )}
 
       {over && snap && (
-        <Overlay title="艦體損毀" lede={`到達第 ${snap.wave} 波 · ${formatScore(snap.score)} 分`}>
+        <Overlay title={snap.theater === "night" ? "被屍群淹沒" : "艦體損毀"} lede={`到達第 ${snap.wave} 波 · ${formatScore(snap.score)} 分`}>
           <label className="block text-sm text-muted" htmlFor="pilot-name">
             記入本機排行的名字
           </label>

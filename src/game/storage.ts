@@ -1,5 +1,5 @@
 import { DEFAULT_WORDS, newWordId } from "@/game/lexicon";
-import type { ChallengeMode, Save, ScoreRow, Word } from "@/game/types";
+import type { ChallengeMode, Save, ScoreRow, Theater, Word } from "@/game/types";
 
 const KEY = "starlex.v1";
 
@@ -9,12 +9,17 @@ export function freshSave(): Save {
     words: DEFAULT_WORDS.map((w) => ({ ...w })),
     scores: [],
     mode: "mix",
+    theater: "space",
     muted: false,
   };
 }
 
 function asMode(v: unknown): ChallengeMode {
   return v === "words" || v === "math" || v === "mix" ? v : "mix";
+}
+
+function asTheater(v: unknown): Theater {
+  return v === "night" ? "night" : "space";
 }
 
 export function sanitizeWords(input: unknown): Word[] {
@@ -65,6 +70,7 @@ export function loadSave(): Save {
       words: words.length > 0 ? words : freshSave().words,
       scores: sanitizeScores(parsed.scores),
       mode: asMode(parsed.mode),
+      theater: asTheater(parsed.theater),
       muted: Boolean(parsed.muted),
     };
   } catch {

@@ -1,6 +1,7 @@
 import { Sfx } from "@/game/audio";
 import { bossName, DEFAULT_WORDS, makeQuestion, type BuiltQuestion } from "@/game/lexicon";
-import type { ChallengeMode, PublicQuestion, QuizKind, Snap, Word } from "@/game/types";
+import { SpriteBook, type SheetId } from "@/game/sprites";
+import type { ChallengeMode, PublicQuestion, QuizKind, Snap, Theater, Word } from "@/game/types";
 
 const PHASES = [2 / 3, 1 / 3];
 const FONT = '"PingFang TC", "Microsoft JhengHei", "WenQuanYi Zen Hei", sans-serif';
@@ -109,7 +110,10 @@ export class Game {
   wave = 1;
   words: Word[] = DEFAULT_WORDS.map((w) => ({ ...w }));
   mode: ChallengeMode = "mix";
+  theater: Theater = "space";
   question: PublicQuestion | null = null;
+
+  private art = new SpriteBook();
 
   private sfx = new Sfx();
   private listeners = new Set<(s: Snap) => void>();
@@ -140,6 +144,7 @@ export class Game {
   private hurtFlash = 0;
   private banner = "";
   private bannerT = 0;
+  private road = 0;
   private hitStop = 0;
   private leftToSpawn = 0;
   private spawnGap = 0;
@@ -184,6 +189,11 @@ export class Game {
 
   setMode(mode: ChallengeMode) {
     this.mode = mode;
+  }
+
+  setTheater(theater: Theater) {
+    this.theater = theater;
+    this.emit();
   }
 
   setMuted(muted: boolean) {
@@ -336,11 +346,11 @@ export class Game {
     if (this.spawningBoss) {
       this.leftToSpawn = 1;
       this.spawnGap = 0.65;
-      this.banner = "首領進場";
+      this.banner = this.theater === "night" ? "屍王進場" : "首領進場";
     } else {
-      this.leftToSpawn = Math.min(12, 4 + this.wave);
+      this.leftToSpawn = this.theater === "night" ? Math.min(16, 6 + this.wave) : Math.min(12, 4 + this.wave);
       this.spawnGap = 0.15;
-      this.banner = `第 ${this.wave} 波`;
+      this.banner = this.theater === "night" ? `屍潮 ${this.wave}` : `第 ${this.wave} 波`;
     }
     this.bannerT = 1.5;
     this.clearHold = 0;
@@ -353,7 +363,7 @@ export class Game {
     this.spawnGap -= dt;
     if (this.leftToSpawn > 0 && this.spawnGap <= 0) {
       const alive = this.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
-      if (this.spawningBoss || alive < 7) {
+      if (this.spawningBoss || alive < (this.theater === "night" ? 9 : 7)) {
         if (this.spawningBoss) this.spawnBoss();
         else this.spawnMinion();
         this.leftToSpawn -= 1;
@@ -477,15 +487,44 @@ export class Game {
     if (this.wave >= 2 && roll > 0.6) kind = "dart";
     if (this.wave >= 4 && roll > 0.84) kind = "tank";
     const fromLeft = Math.random() < 0.5;
+    const night = this.theater === "night";
     const enemy: Enemy = {
       kind,
       x: kind === "dart" ? (fromLeft ? -24 : this.w + 24) : 36 + Math.random() * (this.w - 72),
       y: kind === "dart" ? 50 + Math.random() * this.h * 0.22 : -28,
       vx: kind === "dart" ? (fromLeft ? 150 : -150) : 0,
-      vy: kind === "tank" ? 40 + this.wave * 3 : kind === "dart" ? 90 + this.wave * 6 : 58 + this.wave * 5,
-      hp: kind === "tank" ? 4 + Math.floor(this.wave / 3) : 1 + Math.floor((this.wave - 1) / 5),
+      vy: night
+        ? kind === "tank"
+          ? 36
+          : kind === "dart"
+            ? 150
+            : 56
+        : kind === "tank"
+          ? 40 + this.wave * 3
+          : kind === "dart"
+            ? 90 + this.wave * 6
+            : 58 + this.wave * 5,
+      hp: night
+        ? kind === "tank"
+          ? 8 + Math.floor(this.wave / 2)
+          : kind === "dart"
+            ? 2
+            : 2 + Math.floor((this.wave - 1) / 4)
+        : kind === "tank"
+          ? 4 + Math.floor(this.wave / 3)
+          : 1 + Math.floor((this.wave - 1) / 5),
       maxHp: 1,
-      r: kind === "tank" ? 22 : kind === "dart" ? 13 : 15,
+      r: night
+        ? kind === "tank"
+          ? 26
+          : kind === "dart"
+            ? 16
+            : 18
+        : kind === "tank"
+          ? 22
+          : kind === "dart"
+            ? 13
+            : 15,
       t: 0,
       phase: 0,
       cool: 0.8 + Math.random() * 1.2,
@@ -529,7 +568,7 @@ export class Game {
       alive: true,
       entered: false,
     });
-    this.banner = `${bossName(quiz)} · 血線鎖盾`;
+    this.banner = `${this.bossTitle(quiz)} · 血線鎖盾`;
     this.bannerT = 1.8;
     this.emit();
   }
@@ -552,6 +591,10 @@ export class Game {
           if (ord >= 2) this.shootAim(e.x, e.y, 230);
         }
       }
+      return;
+    }
+    if (this.theater === "night") {
+      this.tickHorde(e, dt);
       return;
     }
     if (e.kind === "grunt") {
@@ -586,6 +629,41 @@ export class Game {
       e.y > this.h + 48 ||
       (e.kind === "dart" && (e.x < -60 || e.x > this.w + 60) && e.t > 0.4);
     if (off) e.alive = false;
+  }
+
+  private tickHorde(e: Enemy, dt: number) {
+    const dx = this.player.x - e.x;
+    const step = dx === 0 ? 0 : dx > 0 ? 1 : -1;
+    if (e.kind === "dart") {
+      e.x += step * (150 + this.wave * 6) * dt;
+      e.y += (140 + this.wave * 8) * dt;
+    } else if (e.kind === "tank") {
+      e.x += step * 40 * dt;
+      e.y += (34 + this.wave * 2) * dt;
+      e.cool -= dt;
+      if (e.cool <= 0 && e.y > 16 && e.y < this.h * 0.8) {
+        e.cool = 2.2;
+        this.bullets.push({
+          x: e.x,
+          y: e.y + e.r,
+          vx: clamp(dx, -70, 70),
+          vy: 150,
+          r: 6,
+          friendly: false,
+          life: 4,
+          dmg: 1,
+        });
+      }
+    } else {
+      e.x += step * (52 + this.wave * 2) * dt;
+      e.y += (50 + this.wave * 3) * dt;
+      e.x += Math.sin(e.t * 2.2 + e.seed) * 18 * dt;
+    }
+    if (e.y > this.h + 56 || e.x < -70 || e.x > this.w + 70) e.alive = false;
+  }
+
+  private bossTitle(kind: QuizKind) {
+    return this.theater === "night" ? "屍王" : bossName(kind);
   }
 
   private shootFan(x: number, y: number, count: number, spread: number, speed: number) {
@@ -721,7 +799,7 @@ export class Game {
       choices: built.choices,
       phase: e.phase + 1,
       phases: PHASES.length,
-      bossName: bossName(e.quiz),
+      bossName: this.bossTitle(e.quiz),
       wrong: false,
     };
     this.pointerOn = false;
@@ -741,7 +819,7 @@ export class Game {
       choices: built.choices,
       phase: (boss?.phase ?? 0) + 1,
       phases: PHASES.length,
-      bossName: bossName(kind),
+      bossName: this.bossTitle(kind),
       wrong: true,
     };
     this.shake = this.reduce ? 0 : 0.7;
@@ -899,6 +977,7 @@ export class Game {
   }
 
   private driftStars(dt: number) {
+    this.road += (this.theater === "night" ? 110 : 70) * dt;
     for (const layer of this.layers) {
       for (const star of layer.stars) {
         star.y += (layer.speed * dt) / Math.max(1, this.h);
@@ -913,27 +992,38 @@ export class Game {
     const sy = this.reduce ? 0 : (Math.random() - 0.5) * this.shake * 10;
     ctx.save();
     ctx.translate(sx, sy);
+    const night = this.theater === "night";
     const sky = ctx.createLinearGradient(0, 0, 0, this.h);
-    sky.addColorStop(0, PAL.bg0);
-    sky.addColorStop(1, PAL.bg1);
+    if (night) {
+      sky.addColorStop(0, "#12100e");
+      sky.addColorStop(0.4, "#1a1714");
+      sky.addColorStop(1, "#0d1412");
+    } else {
+      sky.addColorStop(0, PAL.bg0);
+      sky.addColorStop(1, PAL.bg1);
+    }
     ctx.fillStyle = sky;
     ctx.fillRect(-8, -8, this.w + 16, this.h + 16);
-    this.blob(ctx, this.w * 0.22 + Math.sin(this.time * 0.15) * 12, this.h * 0.28, 200, "rgba(62,224,197,0.09)");
-    this.blob(ctx, this.w * 0.78, this.h * 0.62 + Math.cos(this.time * 0.12) * 16, 240, "rgba(240,162,2,0.06)");
-    this.layers.forEach((layer, i) => {
-      const depth = (i + 1) / this.layers.length;
-      ctx.globalAlpha = 0.28 + depth * 0.62;
-      ctx.fillStyle = i === 2 ? PAL.fg : "#9fb4c8";
-      for (const star of layer.stars) {
-        const x = ((star.x - shift * depth * 0.18) % 1 + 1) % 1;
-        ctx.fillRect(x * this.w, star.y * this.h, star.s, star.s);
-      }
-    });
-    ctx.globalAlpha = 1;
+    if (night) this.drawStreet(ctx);
+    else {
+      this.blob(ctx, this.w * 0.22 + Math.sin(this.time * 0.15) * 12, this.h * 0.28, 200, "rgba(62,224,197,0.09)");
+      this.blob(ctx, this.w * 0.78, this.h * 0.62 + Math.cos(this.time * 0.12) * 16, 240, "rgba(240,162,2,0.06)");
+      this.layers.forEach((layer, i) => {
+        const depth = (i + 1) / this.layers.length;
+        ctx.globalAlpha = 0.28 + depth * 0.62;
+        ctx.fillStyle = i === 2 ? PAL.fg : "#9fb4c8";
+        for (const star of layer.stars) {
+          const x = ((star.x - shift * depth * 0.18) % 1 + 1) % 1;
+          ctx.fillRect(x * this.w, star.y * this.h, star.s, star.s);
+        }
+      });
+      ctx.globalAlpha = 1;
+    }
     for (const p of this.pickups) this.drawPickup(ctx, p);
     for (const b of this.bullets) this.drawBullet(ctx, b);
     for (const e of this.enemies) this.drawEnemy(ctx, e);
-    if (this.status !== "attract") this.drawPlayer(ctx);
+    if (this.status === "attract") this.drawShowcase(ctx);
+    else this.drawPlayer(ctx);
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life / p.max);
       ctx.fillStyle = p.color;
@@ -984,6 +1074,57 @@ export class Game {
     ctx.fill();
   }
 
+  private drawStreet(ctx: CanvasRenderingContext2D) {
+    const curb = Math.max(28, this.w * 0.08);
+    ctx.fillStyle = "#17141a";
+    ctx.fillRect(0, 0, curb, this.h);
+    ctx.fillRect(this.w - curb, 0, curb, this.h);
+    ctx.fillStyle = "#2a241c";
+    ctx.fillRect(curb - 3, 0, 3, this.h);
+    ctx.fillRect(this.w - curb, 0, 3, this.h);
+    const scroll = this.road % 64;
+    ctx.fillStyle = "rgba(214, 196, 120, 0.35)";
+    for (let y = -64 + scroll; y < this.h; y += 64) {
+      ctx.fillRect(this.w / 2 - 2, y, 4, 26);
+    }
+    ctx.fillStyle = "rgba(232, 208, 120, 0.55)";
+    for (let i = 0; i < 6; i++) {
+      const y = ((i * 140 + this.road * 0.35) % (this.h + 80)) - 40;
+      ctx.fillRect(10, y, 6, 10);
+      ctx.fillRect(this.w - 16, y + 30, 6, 10);
+    }
+    this.blob(ctx, this.w * 0.5, this.h * 0.15, 180, "rgba(125, 206, 106, 0.05)");
+    this.layers[2]?.stars.forEach((star) => {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = "#d7e2ea";
+      ctx.fillRect(star.x * this.w, (star.y * this.h * 0.35) % (this.h * 0.4), 1.4, 1.4);
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  private drawShowcase(ctx: CanvasRenderingContext2D) {
+    const y = this.h * 0.72 + Math.sin(this.time * 1.6) * 6;
+    const night = this.theater === "night";
+    const frame = Math.floor(this.time * 8) % 4;
+    ctx.save();
+    ctx.translate(this.w / 2, y);
+    this.art.draw(ctx, night ? "survivor" : "ship", frame, 0, 0, night ? 92 : 110);
+    ctx.restore();
+  }
+
+  private enemyArt(e: Enemy): { id: SheetId; size: number } {
+    if (this.theater === "night") {
+      if (e.kind === "boss") return { id: "z-boss", size: e.r * 2.8 };
+      if (e.kind === "tank") return { id: "z-brute", size: e.r * 2.55 };
+      if (e.kind === "dart") return { id: "z-runner", size: e.r * 2.7 };
+      return { id: "z-walker", size: e.r * 2.7 };
+    }
+    if (e.kind === "boss") return { id: "e-boss", size: e.r * 2.45 };
+    if (e.kind === "tank") return { id: "e-tank", size: e.r * 2.35 };
+    if (e.kind === "dart") return { id: "e-dart", size: e.r * 2.7 };
+    return { id: "e-grunt", size: e.r * 2.55 };
+  }
+
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const p = this.player;
     if (!this.reduce && this.invuln > 0 && Math.floor(this.invuln * 16) % 2 === 0) return;
@@ -991,6 +1132,10 @@ export class Game {
     ctx.translate(p.x, p.y);
     ctx.rotate(p.tilt);
     ctx.globalAlpha = this.reduce && this.invuln > 0 ? 0.65 : 1;
+    const night = this.theater === "night";
+    const frame = Math.floor(this.time * 8) % 4;
+    const painted = this.art.draw(ctx, night ? "survivor" : "ship", frame, 0, 0, night ? 74 : 92);
+    if (!painted) {
     const flick = 0.75 + Math.sin(this.time * 28) * 0.25;
     ctx.fillStyle = PAL.amber;
     ctx.beginPath();
@@ -1029,6 +1174,7 @@ export class Game {
     ctx.beginPath();
     ctx.ellipse(-0.4, -3, 1.5, 3.2, 0, 0, Math.PI * 2);
     ctx.fill();
+    }
     if (this.muzzle > 0) {
       const a = this.muzzle / 0.07;
       ctx.globalAlpha = a;
@@ -1059,6 +1205,26 @@ export class Game {
   }
 
   private drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy) {
+    const spec = this.enemyArt(e);
+    const frame = Math.floor((this.time + e.seed) * (e.kind === "dart" ? 10 : 7)) % 4;
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    if (e.flash > 0) ctx.filter = "brightness(2.5)";
+    const painted = this.art.draw(ctx, spec.id, frame, 0, 0, spec.size);
+    ctx.filter = "none";
+    if (painted) {
+      if (e.kind === "boss" && (e.locked || this.question)) {
+        ctx.globalAlpha = 0.45 + Math.sin(this.time * 7) * 0.25;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = PAL.fg;
+        ctx.beginPath();
+        ctx.arc(0, 0, e.r + 16, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+    ctx.restore();
     ctx.save();
     ctx.translate(e.x, e.y);
     const color = e.kind === "boss" ? (e.quiz === "word" ? PAL.cyan : PAL.amber) : PAL.rose;
@@ -1125,7 +1291,8 @@ export class Game {
   private drawBullet(ctx: CanvasRenderingContext2D, b: Bullet) {
     const mag = Math.hypot(b.vx, b.vy) || 1;
     const len = b.friendly ? 14 : 11;
-    ctx.strokeStyle = b.friendly ? PAL.cyan : PAL.rose;
+    const night = this.theater === "night";
+    ctx.strokeStyle = b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? "#8dce6a" : PAL.rose;
     ctx.lineWidth = b.friendly ? 3 : 2.6;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -1168,9 +1335,10 @@ export class Game {
       score: this.score,
       lives: this.lives,
       wave: this.wave,
+      theater: this.theater,
       boss: boss
         ? {
-            name: bossName(boss.quiz),
+            name: this.bossTitle(boss.quiz),
             hp: boss.hp,
             max: boss.maxHp,
             quiz: boss.quiz,

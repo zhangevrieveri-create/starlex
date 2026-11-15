@@ -1,4 +1,5 @@
 export type ChallengeMode = "mix" | "words" | "math";
+export type Theater = "space" | "night";
 export type QuizKind = "word" | "math";
 
 export type Word = {
@@ -19,6 +20,7 @@ export type Save = {
   words: Word[];
   scores: ScoreRow[];
   mode: ChallengeMode;
+  theater: Theater;
   muted: boolean;
 };
 
@@ -39,6 +41,7 @@ export type Snap = {
   score: number;
   lives: number;
   wave: number;
+  theater: Theater;
   boss: null | {
     name: string;
     hp: number;
