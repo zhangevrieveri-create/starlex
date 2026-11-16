@@ -6,6 +6,93 @@ import type { ChallengeMode, PublicQuestion, QuizKind, Snap, Theater, Word } fro
 const PHASES = [2 / 3, 1 / 3];
 const FONT = '"PingFang TC", "Microsoft JhengHei", "WenQuanYi Zen Hei", sans-serif';
 
+type GateOp = "+" | "-" | "×" | "÷";
+type GateChoice = { op: GateOp; n: number };
+type LevelDef = { name: string; pairs: [GateChoice, GateChoice][]; boss: boolean };
+
+const LEVELS: LevelDef[] = [
+  {
+    name: "起步",
+    pairs: [
+      [{ op: "+", n: 2 }, { op: "+", n: 5 }],
+      [{ op: "×", n: 2 }, { op: "+", n: 3 }],
+    ],
+    boss: false,
+  },
+  {
+    name: "取捨",
+    pairs: [
+      [{ op: "×", n: 2 }, { op: "+", n: 8 }],
+      [{ op: "-", n: 4 }, { op: "+", n: 6 }],
+    ],
+    boss: false,
+  },
+  {
+    name: "翻倍",
+    pairs: [
+      [{ op: "×", n: 3 }, { op: "×", n: 2 }],
+      [{ op: "+", n: 4 }, { op: "-", n: 6 }],
+    ],
+    boss: false,
+  },
+  {
+    name: "旗艦",
+    pairs: [
+      [{ op: "×", n: 2 }, { op: "+", n: 12 }],
+      [{ op: "÷", n: 2 }, { op: "×", n: 2 }],
+    ],
+    boss: true,
+  },
+  {
+    name: "豪賭",
+    pairs: [
+      [{ op: "×", n: 4 }, { op: "-", n: 10 }],
+      [{ op: "+", n: 15 }, { op: "÷", n: 2 }],
+      [{ op: "×", n: 2 }, { op: "+", n: 6 }],
+    ],
+    boss: false,
+  },
+  {
+    name: "壓境",
+    pairs: [
+      [{ op: "×", n: 3 }, { op: "+", n: 20 }],
+      [{ op: "-", n: 12 }, { op: "×", n: 2 }],
+    ],
+    boss: true,
+  },
+  {
+    name: "窄門",
+    pairs: [
+      [{ op: "÷", n: 3 }, { op: "×", n: 3 }],
+      [{ op: "+", n: 8 }, { op: "-", n: 8 }],
+      [{ op: "×", n: 2 }, { op: "+", n: 25 }],
+    ],
+    boss: false,
+  },
+  {
+    name: "終局",
+    pairs: [
+      [{ op: "×", n: 2 }, { op: "×", n: 4 }],
+      [{ op: "-", n: 15 }, { op: "+", n: 18 }],
+      [{ op: "×", n: 3 }, { op: "÷", n: 2 }],
+    ],
+    boss: true,
+  },
+];
+
+type Gate = {
+  pair: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  op: GateOp;
+  n: number;
+  good: boolean;
+  vy: number;
+  alive: boolean;
+};
+
 const PAL = {
   bg0: "#070b14",
   bg1: "#10182a",
@@ -179,6 +266,14 @@ export class Game {
   private waveName = "";
   private asksLeft = 0;
   private gate: Enemy | null = null;
+  private level = 1;
+  private crew = 1;
+  private stage: "gates" | "fight" | "boss" = "gates";
+  private gates: Gate[] = [];
+  private pairCursor = 0;
+  private gateGap = 0;
+  private gateSerial = 1;
+  private cleared = false;
   private queue: Craft[] = [];
   private shake = 0;
   private hurtFlash = 0;
@@ -285,6 +380,13 @@ export class Game {
     this.shot = "needle";
     this.gateAt = 0;
     this.waveName = "";
+    this.level = 1;
+    this.crew = 1;
+    this.stage = "gates";
+    this.gates = [];
+    this.pairCursor = 0;
+    this.gateGap = 0;
+    this.cleared = false;
     this.queue = [];
     this.shake = 0;
     this.hurtFlash = 0;
@@ -296,7 +398,7 @@ export class Game {
     this.player.tilt = 0;
     this.vx = 0;
     this.vy = 0;
-    this.beginWave();
+    this.beginLevel();
     this.syncMusic();
     this.emit();
   }
@@ -424,26 +526,116 @@ export class Game {
     }
   }
 
-  private beginWave() {
+  private beginLevel() {
+    const def = LEVELS[this.level - 1] ?? LEVELS[0]!;
+    this.wave = this.level;
     this.queue = [];
-    this.spawningBoss = this.wave % 3 === 0;
-    if (this.spawningBoss) {
-      this.asksLeft = 0;
-      this.leftToSpawn = 1;
-      this.spawnGap = 0.65;
-      this.waveName = this.theater === "night" ? "屍王" : "旗艦";
-      this.banner = this.theater === "night" ? "屍王進場" : "首領進場";
-    } else {
-      const plan = this.formationPlan();
-      this.queue = plan.crafts;
-      this.asksLeft = this.mode === "drill" ? 3 : 2;
-      this.leftToSpawn = plan.crafts.length;
-      this.spawnGap = 0.12;
-      this.waveName = `${plan.title} · 題標`;
-      this.banner = this.mode === "drill" ? "三隻題標，半血要答" : "兩隻題標，半血要答";
-    }
+    this.leftToSpawn = 0;
+    this.spawningBoss = false;
+    this.stage = "gates";
+    this.gates = [];
+    this.pairCursor = 0;
+    this.gateGap = 0.15;
+    this.asksLeft = 0;
+    this.waveName = def.name;
+    this.banner = `第 ${this.level} 關 · 選一扇光門`;
     this.bannerT = 1.6;
     this.clearHold = 0;
+  }
+
+  private spawnPair(pair: [GateChoice, GateChoice]) {
+    const gap = 34;
+    const gw = Math.max(96, (this.w - gap) / 2 - 10);
+    const xs = [12 + gw / 2, this.w - 12 - gw / 2];
+    const id = this.gateSerial++;
+    pair.forEach((choice, i) => {
+      this.gates.push({
+        pair: id,
+        x: xs[i] ?? this.w / 2,
+        y: -46,
+        w: gw,
+        h: 84,
+        op: choice.op,
+        n: choice.n,
+        good: choice.op === "+" || choice.op === "×",
+        vy: 128 + this.level * 7,
+        alive: true,
+      });
+    });
+  }
+
+  private tickGates(dt: number) {
+    for (const g of this.gates) {
+      if (!g.alive) continue;
+      g.y += g.vy * dt;
+      if (g.y - g.h / 2 > this.h + 6) g.alive = false;
+    }
+    if (this.gates.some((g) => g.alive)) return;
+    const def = LEVELS[this.level - 1];
+    if (def && this.pairCursor < def.pairs.length) {
+      this.gateGap -= dt;
+      if (this.gateGap > 0) return;
+      this.spawnPair(def.pairs[this.pairCursor]!);
+      this.pairCursor += 1;
+      this.gateGap = 0.55;
+      return;
+    }
+    this.startFight();
+  }
+
+  private takeGate(g: Gate) {
+    const before = this.crew;
+    if (g.op === "+") this.crew += g.n;
+    else if (g.op === "-") this.crew -= g.n;
+    else if (g.op === "×") this.crew *= g.n;
+    else this.crew = Math.floor(this.crew / Math.max(1, g.n));
+    this.crew = clamp(Math.round(this.crew), 1, 80);
+    for (const other of this.gates) if (other.pair === g.pair) other.alive = false;
+    const up = this.crew >= before;
+    this.banner = `${g.op}${g.n} → ${this.crew} 人`;
+    this.bannerT = 1.15;
+    this.float(this.player.x, this.player.y - 46, up ? `${this.crew} 人` : `剩 ${this.crew}`, up ? PAL.amber : PAL.rose);
+    this.burst(g.x, g.y, up ? PAL.cyan : PAL.rose, 20);
+    this.score += 40 + Math.abs(this.crew - before) * 12;
+    if (up) this.sfx.good();
+    else this.sfx.bad();
+    this.emit();
+  }
+
+  private startFight() {
+    const plan = this.formationPlan();
+    this.stage = "fight";
+    this.queue = plan.crafts;
+    this.asksLeft = this.level >= 3 ? (this.mode === "drill" ? 2 : 1) : 0;
+    this.leftToSpawn = plan.crafts.length;
+    this.spawnGap = 0.12;
+    this.spawningBoss = false;
+    this.waveName = plan.title;
+    this.banner = `${this.crew} 人出擊`;
+    this.bannerT = 1.2;
+    this.clearHold = 0;
+  }
+
+  private startBoss() {
+    this.stage = "boss";
+    this.queue = [];
+    this.asksLeft = 0;
+    this.leftToSpawn = 1;
+    this.spawnGap = 0.35;
+    this.spawningBoss = true;
+    this.waveName = this.theater === "night" ? "屍王" : "旗艦";
+    this.banner = this.theater === "night" ? "屍王進場" : "首領進場";
+    this.bannerT = 1.4;
+    this.clearHold = 0;
+  }
+
+  private win() {
+    this.cleared = true;
+    this.status = "over";
+    this.banner = "八關通過";
+    this.bannerT = 3;
+    this.sfx.good();
+    this.emit();
   }
 
   private step(dt: number) {
@@ -498,15 +690,22 @@ export class Game {
       });
     }
     const any = this.enemies.some((e) => e.alive);
-    if (!any && this.leftToSpawn <= 0) {
+    if (this.stage === "gates") {
+      this.tickGates(dt);
+    } else if (!any && this.leftToSpawn <= 0) {
       this.clearHold += dt;
-      if (this.clearHold >= 1.35) {
-        const bonus = 100 * this.wave;
+      if (this.clearHold >= 1.15) {
+        const def = LEVELS[this.level - 1];
+        const bonus = 120 * this.level;
         this.score += bonus;
         this.float(this.w / 2, this.h * 0.32, `+${bonus}`, PAL.amber);
-        this.wave += 1;
-        this.drop(this.w / 2, this.h * 0.42);
-        this.beginWave();
+        this.clearHold = 0;
+        if (this.stage === "fight" && def?.boss) this.startBoss();
+        else if (this.level < LEVELS.length) {
+          this.level += 1;
+          this.drop(this.w / 2, this.h * 0.42);
+          this.beginLevel();
+        } else this.win();
         this.emit();
       }
     } else this.clearHold = 0;
@@ -587,7 +786,13 @@ export class Game {
       angles = spread ? [-0.34, -0.17, 0, 0.17, 0.34].map((a) => a * wide) : [0];
       speed = 760;
       look = "needle";
+      if (!spread && this.crew > 1) {
+        const n = Math.min(7, this.crew);
+        const span = Math.min(0.78, 0.12 * (n - 1));
+        angles = Array.from({ length: n }, (_, i) => (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1)));
+      }
     }
+    dmg *= 1 + Math.floor((this.crew - 1) / 12);
     this.fireCd = cd;
     const noseY = this.player.y - 18;
     for (const a of angles) {
@@ -736,8 +941,7 @@ export class Game {
 
   private spawnBoss() {
     const quiz = this.quizForWave();
-    const ord = Math.max(1, this.wave / 3);
-    const maxHp = Math.round(110 + (ord - 1) * 48);
+    const maxHp = Math.round(120 + this.level * 48);
     this.enemies.push({
       kind: "boss",
       x: this.w / 2,
@@ -1172,6 +1376,17 @@ export class Game {
   }
 
   private collide() {
+    if (this.stage === "gates") {
+      for (const g of this.gates) {
+        if (!g.alive) continue;
+        const hitX = Math.abs(this.player.x - g.x) < g.w / 2 + this.player.r * 0.4;
+        const hitY = Math.abs(this.player.y - g.y) < g.h / 2 + this.player.r * 0.3;
+        if (hitX && hitY) {
+          this.takeGate(g);
+          break;
+        }
+      }
+    }
     for (const b of this.bullets) {
       if (b.life <= 0) continue;
       if (b.friendly) {
@@ -1612,6 +1827,7 @@ export class Game {
     if (night) this.drawStreet(ctx);
     else this.drawVoid(ctx, shift);
     for (const p of this.pickups) this.drawPickup(ctx, p);
+    if (this.status === "play") this.drawGates(ctx);
     if (this.status === "play") {
       const glow = night ? "rgba(243,226,182,0.13)" : "rgba(62,224,197,0.16)";
       this.blob(ctx, this.player.x, this.player.y + 6, 78, glow);
@@ -1629,7 +1845,10 @@ export class Game {
     for (const b of this.bullets) if (b.friendly) this.drawBullet(ctx, b);
     for (const e of this.enemies) this.drawEnemy(ctx, e);
     if (this.status === "attract") this.drawShowcase(ctx);
-    else this.drawPlayer(ctx);
+    else {
+      this.drawCrew(ctx);
+      this.drawPlayer(ctx);
+    }
     for (const b of this.bullets) if (!b.friendly) this.drawBullet(ctx, b);
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life / p.max);
@@ -2253,6 +2472,57 @@ export class Game {
     ctx.restore();
   }
 
+  private drawGates(ctx: CanvasRenderingContext2D) {
+    for (const g of this.gates) {
+      if (!g.alive) continue;
+      const color = g.good ? "#7ef6ff" : "#ff4d6d";
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = color;
+      ctx.fillRect(-g.w / 2, -g.h / 2, g.w, g.h);
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(-g.w / 2, -g.h / 2, g.w, g.h);
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-g.w / 2, -2, g.w, 4);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `800 40px ${FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${g.op}${g.n}`, 0, 2);
+      ctx.restore();
+    }
+  }
+
+  private drawCrew(ctx: CanvasRenderingContext2D) {
+    const n = Math.min(12, Math.max(0, this.crew - 1));
+    ctx.fillStyle = this.theater === "night" ? "#f3e2b6" : PAL.cyan;
+    for (let i = 0; i < n; i++) {
+      const col = (i % 4) - 1.5;
+      const row = Math.floor(i / 4) + 1;
+      const x = this.player.x + col * 18;
+      const y = this.player.y + 16 + row * 14;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 7);
+      ctx.lineTo(x + 5, y + 6);
+      ctx.lineTo(x - 5, y + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.font = `800 30px ${FONT}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.lineWidth = 4;
+    ctx.strokeText(String(this.crew), this.player.x, this.player.y - 36);
+    ctx.fillText(String(this.crew), this.player.x, this.player.y - 36);
+  }
+
   private drawPickup(ctx: CanvasRenderingContext2D, p: Pickup) {
     const bob = Math.sin(this.time * 4 + p.x) * 3;
     ctx.save();
@@ -2306,6 +2576,9 @@ export class Game {
       pierce: Math.max(0, this.pierceCd),
       mark: this.enemies.some((e) => e.alive && e.mark),
       shot: this.shotLabel(),
+      crew: this.crew,
+      levels: LEVELS.length,
+      cleared: this.cleared,
       question: this.question,
       muted: this.sfx.muted,
     };
@@ -2333,7 +2606,6 @@ export class Game {
       },
     };
     window.__starlex = {
-      asks: () => this.enemies.filter((e) => e.alive && e.ask).map((e) => `${e.kind}@${Math.round(e.x)},${Math.round(e.y)}`),
       skipToBoss: () => {
         if (this.status !== "play") this.start();
         this.enemies = [];
@@ -2344,7 +2616,10 @@ export class Game {
         this.paused = false;
         this.leftToSpawn = 0;
         this.spawningBoss = false;
-        this.wave = 3;
+        this.wave = 4;
+        this.level = 4;
+        this.stage = "boss";
+        this.gates = [];
         this.spawnBoss();
         this.emit();
       },

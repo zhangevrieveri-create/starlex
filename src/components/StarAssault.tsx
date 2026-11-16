@@ -213,8 +213,8 @@ export function StarAssault() {
               />
               <p className="mt-3 text-base leading-relaxed text-muted">
                 {save.theater === "night"
-                  ? "屍群會停在遠處開火。帶問號的小怪半血會出簡單題。屍王血量掉到鎖點才是大題。"
-                  : "帶問號的小怪半血會出簡單題。首領血量掉到鎖點會升起護盾，答對才能繼續扣血。"}
+                  ? "先撞光門。×2、+6 會加人，−4、÷2 會減人。人越多，後面的槍越多。一共 8 關。"
+                  : "先撞光門。×2、+6 會加人，−4、÷2 會減人。人越多，後面的槍越多。一共 8 關。"}
               </p>
               {best && (
                 <p className="mt-4 text-sm text-accent">
@@ -326,10 +326,11 @@ export function StarAssault() {
                   />
                 ))}
               </div>
-              <p className="mt-2 font-display text-2xl font-semibold text-fg">{formatScore(snap.score)}</p>
+              <p className="mt-2 font-display text-4xl font-bold text-fg">{snap.crew} 人</p>
               <p className="text-sm text-muted">
-                第 {snap.wave} 波 · {snap.boss ? snap.boss.name : snap.waveName}
+                第 {snap.wave}/{snap.levels} 關 · {snap.boss ? snap.boss.name : snap.waveName}
               </p>
+              <p className="font-display text-xl font-semibold text-fg">{formatScore(snap.score)}</p>
             </div>
             <button
               type="button"
@@ -516,7 +517,14 @@ export function StarAssault() {
       )}
 
       {over && snap && (
-        <Overlay title={snap.theater === "night" ? "被屍群淹沒" : "艦體損毀"} lede={`到達第 ${snap.wave} 波 · ${formatScore(snap.score)} 分`}>
+        <Overlay
+          title={snap.cleared ? "八關通過" : snap.theater === "night" ? "被屍群淹沒" : "艦體損毀"}
+          lede={
+            snap.cleared
+              ? `全部打完 · ${snap.crew} 人 · ${formatScore(snap.score)} 分`
+              : `停在第 ${snap.wave} 關 · ${formatScore(snap.score)} 分`
+          }
+        >
           <label className="block text-sm text-muted" htmlFor="pilot-name">
             記入本機排行的名字
           </label>

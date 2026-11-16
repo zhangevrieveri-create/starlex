@@ -64,6 +64,9 @@ export type Snap = {
   pierce: number;
   mark: boolean;
   shot: string;
+  crew: number;
+  levels: number;
+  cleared: boolean;
   question: PublicQuestion | null;
   muted: boolean;
 };
