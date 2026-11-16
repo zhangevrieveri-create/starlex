@@ -759,7 +759,7 @@ export class Game {
     if (e.kind === "boss") {
       if (!e.entered) {
         e.y += 86 * dt;
-        if (e.y >= 112) e.entered = true;
+        if (e.y >= this.bossHome()) e.entered = true;
       } else {
         const night = this.theater === "night";
         if (e.wind !== 0) {
@@ -771,10 +771,10 @@ export class Game {
           const side = Math.sin(e.t * 0.5) > 0 ? 1 : -1;
           const dest = this.w / 2 + side * this.w * 0.22;
           e.x += (dest - e.x) * Math.min(1, dt * 1.5);
-          e.y = 176 + Math.sin(e.t * 2.4) * 5;
+          e.y = this.bossHome() + Math.sin(e.t * 2.4) * 5;
         } else {
           e.x = this.w / 2 + Math.sin(e.t * (0.55 + ord * 0.03)) * this.w * 0.3;
-          e.y = 108 + Math.sin(e.t * 0.9) * 12;
+          e.y = this.bossHome() + Math.sin(e.t * 0.9) * 10;
         }
         e.cool -= dt;
         if (e.locked || e.cool > 0) return;
@@ -918,6 +918,10 @@ export class Game {
     return Math.abs(d) < 1.05;
   }
 
+  private bossHome() {
+    return this.theater === "night" ? Math.max(280, this.h * 0.4) : Math.max(230, this.h * 0.3);
+  }
+
   private tickLunge(e: Enemy, dt: number) {
     if (e.wind > 0) {
       e.wind -= dt;
@@ -927,7 +931,7 @@ export class Game {
       return;
     }
     e.wind += dt;
-    e.y += (176 - e.y) * Math.min(1, dt * 3);
+    e.y += (this.bossHome() - e.y) * Math.min(1, dt * 3);
     if (e.wind >= 0) {
       e.wind = 0;
       e.cool = 1.15;
@@ -1904,34 +1908,35 @@ export class Game {
   private drawBoss(ctx: CanvasRenderingContext2D, e: Enemy) {
     const night = this.theater === "night";
     const lock = e.locked || !!this.question;
+    const size = night ? e.r * 3.6 : e.r * 4.4;
     ctx.save();
     ctx.translate(e.x, e.y);
-    if (e.flash > 0) ctx.filter = "brightness(1.7)";
-    if (night) this.drawKing(ctx, e);
-    else this.drawFlagship(ctx, e);
+    if (e.flash > 0) ctx.filter = "brightness(1.6)";
+    const painted = this.art.drawWhole(ctx, night ? "boss-king" : "boss-flag", 0, 0, size, size);
     ctx.filter = "none";
+    if (!painted) {
+      if (night) this.drawKing(ctx, e);
+      else this.drawFlagship(ctx, e);
+    }
+    if (!night && e.phase === 1 && !lock && e.cool < 0.55 && e.cool > 0) {
+      ctx.globalAlpha = 0.28 + (0.55 - e.cool);
+      ctx.fillStyle = "#ff4d6d";
+      ctx.fillRect(-3, size * 0.34, 6, this.h);
+      ctx.globalAlpha = 1;
+    }
     if (lock) {
-      ctx.globalAlpha = 0.55 + Math.sin(this.time * 7) * 0.2;
-      ctx.strokeStyle = night ? "#d6ff9a" : PAL.fg;
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = night ? "#d6ff9a" : "#7ef6ff";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      if (night) {
-        for (let i = 0; i < 6; i++) {
-          const a = (i / 6) * Math.PI * 2 + this.time;
-          const x = Math.cos(a) * (e.r + 18);
-          const y = Math.sin(a) * (e.r + 14);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-      } else ctx.arc(0, 0, e.r + 22, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.46, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = night ? "#d6ff9a" : PAL.cyan;
-    ctx.font = `600 14px ${FONT}`;
+    ctx.fillStyle = night ? "#d6ff9a" : "#7ef6ff";
+    ctx.font = `600 15px ${FONT}`;
     ctx.textAlign = "center";
-    ctx.fillText(night ? "屍王" : "旗艦", 0, e.r + 28);
+    ctx.fillText(night ? "屍王" : "旗艦", 0, size * 0.5 + 16);
     ctx.restore();
   }
 
@@ -1992,12 +1997,6 @@ export class Game {
       ctx.beginPath();
       ctx.arc(Math.cos(a) * (e.r + 8), Math.sin(a) * (e.r + 8), 3.5, 0, Math.PI * 2);
       ctx.fill();
-    }
-    if (e.phase === 1 && !e.locked && !this.question && e.cool < 0.55 && e.cool > 0) {
-      ctx.globalAlpha = 0.25 + (0.55 - e.cool) * 0.9;
-      ctx.fillStyle = "#ff4d6d";
-      ctx.fillRect(-7, e.r * 0.2, 14, this.h);
-      ctx.globalAlpha = 1;
     }
   }
 

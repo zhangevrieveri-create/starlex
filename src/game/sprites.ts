@@ -8,7 +8,9 @@ export type SheetId =
   | "e-grunt"
   | "e-dart"
   | "e-tank"
-  | "e-boss";
+  | "e-boss"
+  | "boss-king"
+  | "boss-flag";
 
 const SRC: Record<SheetId, string> = {
   ship: "/sprites/ship.png",
@@ -21,6 +23,8 @@ const SRC: Record<SheetId, string> = {
   "e-dart": "/sprites/e-dart.png",
   "e-tank": "/sprites/e-tank.png",
   "e-boss": "/sprites/e-boss.png",
+  "boss-king": "/sprites/boss-king.png",
+  "boss-flag": "/sprites/boss-flag.png",
 };
 
 export class SpriteBook {
@@ -61,6 +65,16 @@ export class SpriteBook {
       size,
       size,
     );
+    ctx.imageSmoothingEnabled = prev;
+    return true;
+  }
+
+  drawWhole(ctx: CanvasRenderingContext2D, id: SheetId, x: number, y: number, w: number, h: number) {
+    const img = this.images.get(id);
+    if (!img || !img.complete || img.naturalWidth < 8) return false;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
     ctx.imageSmoothingEnabled = prev;
     return true;
   }
