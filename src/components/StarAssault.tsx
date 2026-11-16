@@ -31,11 +31,13 @@ const THEATERS: { id: Theater; label: string; copy: string }[] = [
 type SpeechRec = {
   lang: string;
   interimResults: boolean;
+  continuous: boolean;
   maxAlternatives: number;
-  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onerror: (() => void) | null;
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }) => void) | null;
+  onerror: ((ev: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
+  stop: () => void;
 };
 
 const RUNS: { id: RunMode; label: string; copy: string }[] = [
@@ -53,6 +55,7 @@ const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
 export function StarAssault() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
+  const earRef = useRef<SpeechRec | null>(null);
   const [save, setSave] = useState<Save>(() => freshSave());
   const [snap, setSnap] = useState<Snap | null>(null);
   const [screen, setScreen] = useState<Screen>("menu");
@@ -207,39 +210,91 @@ export function StarAssault() {
     game.setPointer(e.clientX - rect.left, e.clientY - rect.top, on);
   }
 
+  function beep() {
+    const Ctx = window.AudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.value = 0.06;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.07);
+    osc.onended = () => void ctx.close();
+  }
+
+  function speakLetter(letter: string | null) {
+    if (!letter || !window.speechSynthesis) {
+      setHearing("这台装置放不出读音，请看下面的选项");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(letter);
+    utter.lang = "en-US";
+    utter.rate = 0.72;
+    window.speechSynthesis.speak(utter);
+    setHearing("先听，再按大声读，跟着读一遍");
+  }
+
   function listen(letter: string | null) {
     if (!letter) return;
+    gameRef.current?.armHear();
+    beep();
+    try {
+      earRef.current?.stop();
+    } catch {
+      /* recognition was not running */
+    }
     const host = window as unknown as {
       SpeechRecognition?: new () => SpeechRec;
       webkitSpeechRecognition?: new () => SpeechRec;
     };
     const Ctor = host.SpeechRecognition ?? host.webkitSpeechRecognition;
     if (!Ctor) {
-      setHearing("这台装置听不了，请选读音");
-      window.setTimeout(() => setHearing(""), 1800);
+      setHearing("这台装置听不了麦克风。请按听一听，再选下面的读音");
       return;
     }
     const rec = new Ctor();
-    rec.lang = "en-US";
-    rec.interimResults = false;
+    earRef.current = rec;
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.continuous = false;
     rec.maxAlternatives = 5;
-    setHearing("正在听…");
+    setHearing("正在听，请大声读这个字母");
     rec.onresult = (ev) => {
       const bits: string[] = [];
-      const row = ev.results[0];
-      if (row) for (let i = 0; i < row.length; i++) bits.push(row[i]?.transcript ?? "");
-      gameRef.current?.hear(bits.join(" "));
-      setHearing("");
+      for (let r = 0; r < ev.results.length; r++) {
+        const row = ev.results[r];
+        if (!row) continue;
+        for (let i = 0; i < row.length; i++) bits.push(row[i]?.transcript ?? "");
+      }
+      const text = bits.join(" ").trim();
+      if (!text) {
+        setHearing("没听到。靠近一点，再按一次");
+        return;
+      }
+      const ok = gameRef.current?.hear(text) ?? false;
+      setHearing(ok ? "读对了" : `听到「${text}」。不对就再读，或选下面的读音`);
     };
-    rec.onerror = () => {
-      setHearing("没听清，再读一次");
-      window.setTimeout(() => setHearing(""), 1400);
+    rec.onerror = (ev) => {
+      const code = ev.error ?? "";
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setHearing("麦克风被关掉了。请允许麦克风，或直接选读音");
+      } else if (code === "no-speech") {
+        setHearing("没听到声音。再按大声读，读得清楚一点");
+      } else {
+        setHearing("这里听不到。可以选下面的读音");
+      }
     };
-    rec.onend = () => setHearing((cur) => (cur === "正在听…" ? "" : cur));
+    rec.onend = () => {
+      if (earRef.current === rec) earRef.current = null;
+    };
     try {
       rec.start();
     } catch {
-      setHearing("这台装置听不了，请选读音");
+      setHearing("这台装置听不了麦克风。请选下面的读音");
     }
   }
 
@@ -258,6 +313,7 @@ export function StarAssault() {
         className="absolute inset-0 h-full w-full"
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
+          if (gameRef.current?.asking()) return;
           if (e.pointerType === "mouse") return;
           e.currentTarget.setPointerCapture(e.pointerId);
           point(e, true);
@@ -528,14 +584,24 @@ export function StarAssault() {
             </h2>
             <p className="mt-1 text-center text-sm text-muted">{question.hint}</p>
             {question.letter && (
-              <button
-                type="button"
-                className="mt-3 min-h-11 w-full rounded-xl bg-primary px-4 font-display text-base font-semibold text-bg"
-                onClick={() => listen(question.letter)}
-              >
-                {hearing || "大声读"}
-              </button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl border border-border bg-bg px-3 font-display text-base text-fg"
+                  onClick={() => speakLetter(question.letter)}
+                >
+                  听一听
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl bg-primary px-3 font-display text-base font-semibold text-bg"
+                  onClick={() => listen(question.letter)}
+                >
+                  大声读
+                </button>
+              </div>
             )}
+            {hearing && <p className="mt-2 text-center text-sm text-accent">{hearing}</p>}
             {question.wrong && <p className="mt-1 text-center text-sm text-danger">這題換新的。答對才繼續扣血。</p>}
             <div className="mt-3 grid gap-2">
               {question.choices.map((choice, index) => (

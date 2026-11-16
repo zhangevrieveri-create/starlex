@@ -380,14 +380,24 @@ export class Game {
 
   hear(text: string) {
     const letter = this.built?.letter;
-    if (!letter || !this.question || this.paused || this.inputLock > 0 || this.status !== "play") return;
+    if (!letter || !this.question || this.paused || this.status !== "play") return false;
+    this.inputLock = 0;
     if (!letterHeard(letter, text)) {
-      this.banner = "没听清，再读一次，或选读音";
-      this.bannerT = 1.2;
+      this.banner = text ? `听到 ${text}` : "没听到";
+      this.bannerT = 1.4;
       this.emit();
-      return;
+      return false;
     }
     this.solveGate();
+    return true;
+  }
+
+  armHear() {
+    this.inputLock = 0;
+  }
+
+  asking() {
+    return Boolean(this.question);
   }
 
   setTheater(theater: Theater) {

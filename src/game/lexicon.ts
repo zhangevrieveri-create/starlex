@@ -78,44 +78,48 @@ export type BuiltQuestion = {
 type Letter = { letter: string; say: string; hear: string[] };
 
 export const LETTERS: Letter[] = [
-  { letter: "A", say: "ei", hear: ["a", "ay", "ei", "hey"] },
-  { letter: "B", say: "bi", hear: ["b", "be", "bee", "bi"] },
-  { letter: "C", say: "si", hear: ["c", "see", "sea", "si"] },
-  { letter: "D", say: "di", hear: ["d", "dee", "di"] },
-  { letter: "E", say: "yi", hear: ["e", "ee", "yi"] },
-  { letter: "F", say: "ef", hear: ["f", "ef", "eff"] },
-  { letter: "G", say: "ji", hear: ["g", "gee", "jee", "ji"] },
-  { letter: "H", say: "eich", hear: ["h", "aitch", "eich"] },
-  { letter: "I", say: "ai", hear: ["i", "eye", "ai"] },
-  { letter: "J", say: "jei", hear: ["j", "jay", "jei"] },
-  { letter: "K", say: "kei", hear: ["k", "kay", "kei"] },
-  { letter: "L", say: "el", hear: ["l", "el", "ell"] },
-  { letter: "M", say: "em", hear: ["m", "em"] },
-  { letter: "N", say: "en", hear: ["n", "en"] },
-  { letter: "O", say: "ou", hear: ["o", "oh", "ou"] },
-  { letter: "P", say: "pi", hear: ["p", "pee", "pi"] },
-  { letter: "Q", say: "kiu", hear: ["q", "cue", "queue", "kiu", "kyu"] },
-  { letter: "R", say: "ar", hear: ["r", "are", "ar"] },
-  { letter: "S", say: "es", hear: ["s", "es", "ess"] },
-  { letter: "T", say: "ti", hear: ["t", "tee", "ti"] },
-  { letter: "U", say: "you", hear: ["u", "you", "yu"] },
-  { letter: "V", say: "vi", hear: ["v", "vee", "vi"] },
-  { letter: "W", say: "dabliu", hear: ["w", "double u", "doubleyou", "dabliu"] },
-  { letter: "X", say: "eks", hear: ["x", "ex", "eks"] },
-  { letter: "Y", say: "wai", hear: ["y", "why", "wai"] },
-  { letter: "Z", say: "zi", hear: ["z", "zee", "zi", "zed"] },
+  { letter: "A", say: "ei", hear: ["a", "ay", "ei", "hey", "诶", "哎"] },
+  { letter: "B", say: "bi", hear: ["b", "be", "bee", "bi", "比", "必"] },
+  { letter: "C", say: "si", hear: ["c", "see", "sea", "si", "西", "息"] },
+  { letter: "D", say: "di", hear: ["d", "dee", "di", "迪", "地"] },
+  { letter: "E", say: "yi", hear: ["e", "ee", "yi", "伊", "衣"] },
+  { letter: "F", say: "ef", hear: ["f", "ef", "eff", "艾弗", "爱福"] },
+  { letter: "G", say: "ji", hear: ["g", "gee", "jee", "ji", "吉"] },
+  { letter: "H", say: "eich", hear: ["h", "aitch", "eich", "诶吃", "爱吃"] },
+  { letter: "I", say: "ai", hear: ["i", "eye", "ai", "爱", "艾"] },
+  { letter: "J", say: "jei", hear: ["j", "jay", "jei", "杰", "界"] },
+  { letter: "K", say: "kei", hear: ["k", "kay", "kei", "克", "开"] },
+  { letter: "L", say: "el", hear: ["l", "el", "ell", "艾欧", "哎哦"] },
+  { letter: "M", say: "em", hear: ["m", "em", "艾姆", "哎母"] },
+  { letter: "N", say: "en", hear: ["n", "en", "恩"] },
+  { letter: "O", say: "ou", hear: ["o", "oh", "ou", "欧"] },
+  { letter: "P", say: "pi", hear: ["p", "pee", "pi", "皮", "批"] },
+  { letter: "Q", say: "kiu", hear: ["q", "cue", "queue", "kiu", "kyu", "克由", "丘"] },
+  { letter: "R", say: "ar", hear: ["r", "are", "ar", "阿", "啊"] },
+  { letter: "S", say: "es", hear: ["s", "es", "ess", "艾斯", "爱思"] },
+  { letter: "T", say: "ti", hear: ["t", "tee", "ti", "提", "踢"] },
+  { letter: "U", say: "you", hear: ["u", "you", "yu", "由", "优"] },
+  { letter: "V", say: "vi", hear: ["v", "vee", "vi", "维", "薇"] },
+  { letter: "W", say: "dabliu", hear: ["w", "double u", "doubleyou", "dabliu", "达不溜", "达不留"] },
+  { letter: "X", say: "eks", hear: ["x", "ex", "eks", "艾克斯"] },
+  { letter: "Y", say: "wai", hear: ["y", "why", "wai", "外", "歪"] },
+  { letter: "Z", say: "zi", hear: ["z", "zee", "zi", "zed", "贼", "兹"] },
 ];
 
 export function letterHeard(letter: string, transcript: string): boolean {
   const row = LETTERS.find((item) => item.letter === letter.toUpperCase());
   if (!row) return false;
   const raw = transcript.toLowerCase().trim();
+  if (!raw) return false;
   const compact = raw.replace(/[^a-z]/g, "");
-  if (compact === row.letter.toLowerCase()) return true;
+  const words = compact ? raw.split(/[^a-z]+/).filter(Boolean) : [];
+  if (words.includes(row.letter.toLowerCase()) || compact === row.say) return true;
+  if (raw.includes(row.say)) return true;
   return row.hear.some((alias) => {
     const text = alias.toLowerCase();
-    if (text.includes(" ")) return raw.includes(text);
-    return compact === text.replace(/[^a-z]/g, "");
+    if (/[^\x00-\x7f]/.test(text) || text.includes(" ")) return raw.includes(text);
+    if (text.length <= 2) return words.includes(text) || compact === text;
+    return compact === text || compact.includes(text) || words.includes(text);
   });
 }
 
