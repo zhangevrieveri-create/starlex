@@ -61,6 +61,8 @@ export type Snap = {
   };
   graze: number;
   grazeReady: boolean;
+  pierce: number;
+  mark: boolean;
   question: PublicQuestion | null;
   muted: boolean;
 };

@@ -388,8 +388,8 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "船外黃圈是擦彈。貼著敵彈走，圈滿會清彈並打開散彈。左下三個技能開局就能按。"
-            : "船外黃圈是擦彈。貼著敵彈走，圈滿會清彈並打開散彈。左下三個技能開局就能按。"}
+            ? "金色缺口轉到你這邊，信標才吃傷害。它會往下逃。空白鍵或「貫」無視護罩。"
+            : "金色缺口轉到你這邊，信標才吃傷害。它會往下逃。空白鍵或「貫」無視護罩。"}
         </p>
       )}
 
@@ -429,6 +429,13 @@ export function StarAssault() {
 
       {screen === "play" && snap && !paused && !over && (
         <div className="absolute inset-x-0 bottom-0 z-10 flex justify-start gap-2 px-3 pb-3 safe-bottom">
+          <button
+            type="button"
+            className={`pointer-events-auto min-h-11 min-w-16 rounded-xl border px-3 text-sm ${snap.pierce <= 0 ? "border-accent text-fg" : "border-border text-muted"} bg-surface/90`}
+            onClick={() => gameRef.current?.usePierce()}
+          >
+            貫 {snap.pierce <= 0 ? "就緒" : Math.ceil(snap.pierce)}
+          </button>
           {(
             [
               ["spread", "散", "KeyZ"],

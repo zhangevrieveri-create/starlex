@@ -39,6 +39,8 @@ type Enemy = {
   alive: boolean;
   entered: boolean;
   hold: number;
+  mark: boolean;
+  guard: number;
 };
 
 type Bullet = {
@@ -52,6 +54,8 @@ type Bullet = {
   life: number;
   dmg: number;
   grazeCd?: number;
+  pierce?: boolean;
+  hurt?: Set<Enemy>;
 };
 
 type PickupKind = "spread" | "shield" | "speed";
@@ -63,6 +67,7 @@ type Craft = {
   vx: number;
   vy: number;
   gap: number;
+  mark?: boolean;
 };
 
 type Pickup = { kind: PickupKind; x: number; y: number; life: number; r: number };
@@ -164,6 +169,7 @@ export class Game {
   private graze = 0;
   private grazeReady = false;
   private grazeHot = false;
+  private pierceCd = 0;
   private gateAt = 0;
   private waveName = "";
   private queue: Craft[] = [];
@@ -266,6 +272,7 @@ export class Game {
     this.stockShield = 1;
     this.graze = 0;
     this.grazeReady = false;
+    this.pierceCd = 0;
     this.gateAt = 0;
     this.waveName = "";
     this.queue = [];
@@ -345,6 +352,11 @@ export class Game {
         return;
       }
     }
+    if (e.code === "Space" && !e.repeat && !this.question) {
+      e.preventDefault();
+      this.usePierce();
+      return;
+    }
     this.keys.add(e.code);
     if (
       e.code === "ArrowUp" ||
@@ -410,8 +422,8 @@ export class Game {
       this.queue = plan.crafts;
       this.leftToSpawn = plan.crafts.length;
       this.spawnGap = 0.12;
-      this.waveName = plan.title;
-      this.banner = plan.title;
+    this.waveName = `${plan.title} · 信標`;
+    this.banner = "打缺口，別讓它溜走";
     }
     this.bannerT = 1.6;
     this.clearHold = 0;
@@ -454,6 +466,7 @@ export class Game {
     this.invuln = Math.max(0, this.invuln - dt);
     if (this.powSpread > 0) this.powSpread -= dt;
     if (this.powSpeed > 0) this.powSpeed -= dt;
+    if (this.pierceCd > 0) this.pierceCd -= dt;
     if (this.particles.length < 150 && Math.random() < 0.7) {
       this.particles.push({
         x: this.player.x - 4,
@@ -604,6 +617,8 @@ export class Game {
         });
       }
     }
+    const markAt = Math.floor((crafts.length - 1) / 2);
+    if (crafts[markAt]) crafts[markAt]!.mark = true;
     return { title: titles[pattern] ?? "橫列推進", crafts };
   }
 
@@ -638,6 +653,8 @@ export class Game {
       alive: true,
       entered: true,
       hold,
+      mark: Boolean(craft.mark),
+      guard: Math.PI / 2,
     };
     this.enemies.push(enemy);
   }
@@ -671,6 +688,8 @@ export class Game {
       alive: true,
       entered: false,
       hold: 0,
+      mark: false,
+      guard: 0,
     });
     this.banner = `${this.bossTitle(quiz)} · 血線鎖盾`;
     this.bannerT = 1.8;
@@ -698,6 +717,11 @@ export class Game {
       e.hold -= dt;
       e.x += e.vx * dt;
       e.y += e.vy * dt;
+      if (e.mark) e.guard += dt * 0.6;
+      return;
+    }
+    if (e.mark) {
+      this.tickMark(e, dt);
       return;
     }
     if (this.theater === "night") {
@@ -801,6 +825,28 @@ export class Game {
     }
     const bed = this.liveBoss() ? "boss" : this.theater === "night" ? "night" : "space";
     this.sfx.playBed(bed, Boolean(this.question));
+  }
+
+  private tickMark(e: Enemy, dt: number) {
+    e.guard += dt * 1.15;
+    const dest = this.w * (e.seed > 3 ? 0.22 : 0.78);
+    e.x += (dest - e.x) * Math.min(1, dt * 1.15);
+    e.y += 76 * dt;
+    if (e.y > this.h + 40) {
+      e.alive = false;
+      this.score = Math.max(0, this.score - 120);
+      this.banner = "信標溜走了";
+      this.bannerT = 1.2;
+      this.float(clamp(e.x, 40, this.w - 40), this.h - 48, "溜走 -120", PAL.rose);
+      this.sfx.bad();
+    }
+  }
+
+  private gapOpen(e: Enemy, x: number, y: number) {
+    let d = Math.atan2(y - e.y, x - e.x) - e.guard;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d) < 1.05;
   }
 
   private bossVolley(e: Enemy) {
@@ -981,10 +1027,17 @@ export class Game {
       if (b.friendly) {
         for (const e of this.enemies) {
           if (!e.alive) continue;
-          if (this.hit(b.x, b.y, b.r, e.x, e.y, e.r)) {
-            b.life = 0;
-            this.damageEnemy(e, b.dmg);
-            break;
+          if (this.hit(b.x, b.y, b.r, e.x, e.y, e.r * (e.mark ? 0.92 : 1))) {
+            if (b.pierce) {
+              if (!b.hurt) b.hurt = new Set();
+              if (b.hurt.has(e)) continue;
+              b.hurt.add(e);
+              this.damageEnemy(e, b.dmg, true, b.x, b.y);
+            } else {
+              b.life = 0;
+              this.damageEnemy(e, b.dmg, false, b.x, b.y);
+              break;
+            }
           }
         }
       } else if (this.invuln <= 0 && this.hit(b.x, b.y, b.r, this.player.x, this.player.y, this.player.r)) {
@@ -1045,10 +1098,17 @@ export class Game {
     return dx * dx + dy * dy <= rr * rr;
   }
 
-  private damageEnemy(e: Enemy, dmg: number) {
+  private damageEnemy(e: Enemy, dmg: number, pierce = false, x = this.player.x, y = this.player.y) {
     if (!e.alive) return;
     if (e.kind === "boss" && e.locked) {
       this.burst(e.x, e.y - e.r, PAL.fg, 4);
+      return;
+    }
+    if (e.mark && !pierce && !this.gapOpen(e, x, y)) {
+      if (e.flash <= 0) {
+        e.flash = 0.12;
+        this.burst(x, y, PAL.fg, 4);
+      }
       return;
     }
     e.hp -= dmg;
@@ -1145,9 +1205,9 @@ export class Game {
     if (!e.alive) return;
     e.alive = false;
     e.locked = false;
-    const pts = e.kind === "boss" ? 2000 : e.kind === "tank" ? 220 : e.kind === "dart" ? 140 : 100;
+    const pts = e.kind === "boss" ? 2000 : e.mark ? 460 : e.kind === "tank" ? 220 : e.kind === "dart" ? 140 : 100;
     this.score += pts;
-    this.float(e.x, e.y, `+${pts}`, e.kind === "boss" ? PAL.amber : PAL.fg);
+    this.float(e.x, e.y, e.mark ? `信標 +${pts}` : `+${pts}`, e.kind === "boss" || e.mark ? PAL.amber : PAL.fg);
     this.burst(e.x, e.y, e.kind === "boss" ? PAL.amber : PAL.rose, e.kind === "boss" ? 30 : 11);
     this.sfx.boom(e.kind === "boss");
     this.hitStop = e.kind === "boss" ? 0.1 : 0.03;
@@ -1157,6 +1217,11 @@ export class Game {
       this.built = null;
       this.banner = "航道開啟";
       this.bannerT = 1.3;
+      this.drop(e.x, e.y);
+    } else if (e.mark) {
+      this.grantStock();
+      this.banner = "缺口打穿";
+      this.bannerT = 1.15;
       this.drop(e.x, e.y);
     } else if (Math.random() < 0.55) this.drop(e.x, e.y);
     this.emit();
@@ -1186,6 +1251,38 @@ export class Game {
       this.sfx.stopMusic();
       this.sfx.boom(true);
     }
+    this.emit();
+  }
+
+  private grantStock() {
+    const roll = Math.random();
+    const kind: PickupKind = roll < 0.34 ? "spread" : roll < 0.67 ? "shield" : "speed";
+    if (kind === "spread") this.stockSpread = Math.min(3, this.stockSpread + 1);
+    if (kind === "speed") this.stockSpeed = Math.min(3, this.stockSpeed + 1);
+    if (kind === "shield") this.stockShield = Math.min(3, this.stockShield + 1);
+    const label = kind === "spread" ? "散彈 +1" : kind === "speed" ? "加速 +1" : "護盾 +1";
+    this.float(this.player.x, this.player.y - 26, label, PAL.amber);
+  }
+
+  usePierce() {
+    if (this.status !== "play" || this.paused || this.question || this.pierceCd > 0) return;
+    this.pierceCd = 8;
+    this.bullets.push({
+      x: this.player.x,
+      y: this.player.y - 18,
+      vx: 0,
+      vy: -820,
+      ay: 0,
+      r: 8,
+      friendly: true,
+      life: 1.05,
+      dmg: 5,
+      pierce: true,
+    });
+    this.muzzle = 0.12;
+    this.banner = "貫穿";
+    this.bannerT = 0.7;
+    this.sfx.shoot();
     this.emit();
   }
 
@@ -1334,6 +1431,20 @@ export class Game {
     if (night) this.drawStreet(ctx);
     else this.drawVoid(ctx, shift);
     for (const p of this.pickups) this.drawPickup(ctx, p);
+    if (this.status === "play") {
+      const glow = night ? "rgba(243,226,182,0.13)" : "rgba(62,224,197,0.16)";
+      this.blob(ctx, this.player.x, this.player.y + 6, 78, glow);
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+        this.blob(
+          ctx,
+          e.x,
+          e.y,
+          e.mark ? e.r * 3.1 : e.r * 2.2,
+          e.mark ? "rgba(240,162,2,0.28)" : e.kind === "boss" ? "rgba(62,224,197,0.18)" : "rgba(255,90,110,0.1)",
+        );
+      }
+    }
     for (const b of this.bullets) this.drawBullet(ctx, b);
     for (const e of this.enemies) this.drawEnemy(ctx, e);
     if (this.status === "attract") this.drawShowcase(ctx);
@@ -1371,6 +1482,15 @@ export class Game {
     vig.addColorStop(1, "rgba(0,0,0,0.45)");
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, this.w, this.h);
+    if (!this.reduce) {
+      ctx.globalCompositeOperation = "soft-light";
+      const grade = ctx.createLinearGradient(0, 0, 0, this.h);
+      grade.addColorStop(0, night ? "rgba(70,90,130,0.45)" : "rgba(50,110,150,0.4)");
+      grade.addColorStop(1, night ? "rgba(120,70,40,0.35)" : "rgba(40,20,70,0.35)");
+      ctx.fillStyle = grade;
+      ctx.fillRect(0, 0, this.w, this.h);
+      ctx.globalCompositeOperation = "source-over";
+    }
     if (this.hurtFlash > 0) {
       ctx.fillStyle = `rgba(255,77,109,${this.hurtFlash * 0.35})`;
       ctx.fillRect(0, 0, this.w, this.h);
@@ -1598,6 +1718,7 @@ export class Game {
     if (e.flash > 0) ctx.filter = "brightness(2.5)";
     const painted = this.art.draw(ctx, spec.id, frame, 0, 0, spec.size);
     ctx.filter = "none";
+    this.drawTell(ctx, e);
     if (painted) {
       if (e.kind === "boss" && (e.locked || this.question)) {
         ctx.globalAlpha = 0.45 + Math.sin(this.time * 7) * 0.25;
@@ -1674,13 +1795,51 @@ export class Game {
     ctx.restore();
   }
 
+  private drawTell(ctx: CanvasRenderingContext2D, e: Enemy) {
+    if (e.mark) {
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = PAL.amber;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r + 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r + 16, e.guard + 1.05, e.guard + Math.PI * 2 - 1.05);
+      ctx.stroke();
+      ctx.fillStyle = "#fff4c8";
+      ctx.beginPath();
+      ctx.arc(Math.cos(e.guard) * (e.r + 16), Math.sin(e.guard) * (e.r + 16), 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PAL.amber;
+      ctx.font = `600 14px ${FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("信標", 0, e.y < 86 ? e.r + 24 : -e.r - 22);
+      return;
+    }
+    if (e.kind === "boss" || e.hold > 0 || e.cool > 0.34 || e.cool <= 0) return;
+    const dx = this.player.x - e.x;
+    const dy = this.player.y - e.y;
+    const len = Math.hypot(dx, dy) || 1;
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = this.theater === "night" ? "#b6f59a" : PAL.rose;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo((dx / len) * e.r * 0.4, (dy / len) * e.r * 0.4);
+    ctx.lineTo((dx / len) * 46, (dy / len) * 46);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   private drawBullet(ctx: CanvasRenderingContext2D, b: Bullet) {
     const mag = Math.hypot(b.vx, b.vy) || 1;
     const night = this.theater === "night";
     const lob = b.ay > 8;
-    const len = b.friendly ? 14 : lob ? 16 : 11;
-    ctx.strokeStyle = b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? (lob ? "#c6f59a" : "#8dce6a") : PAL.rose;
-    ctx.lineWidth = b.friendly ? 3 : lob ? 4.2 : 2.6;
+    const len = b.pierce ? 36 : b.friendly ? 14 : lob ? 16 : 11;
+    ctx.strokeStyle = b.pierce ? PAL.amber : b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? (lob ? "#c6f59a" : "#8dce6a") : PAL.rose;
+    ctx.lineWidth = b.pierce ? 6 : b.friendly ? 3 : lob ? 4.2 : 2.6;
     ctx.lineCap = "round";
     ctx.globalAlpha = 0.35;
     ctx.beginPath();
@@ -1765,6 +1924,8 @@ export class Game {
       },
       graze: this.graze,
       grazeReady: this.grazeReady,
+      pierce: Math.max(0, this.pierceCd),
+      mark: this.enemies.some((e) => e.alive && e.mark),
       question: this.question,
       muted: this.sfx.muted,
     };
@@ -1835,7 +1996,7 @@ export class Game {
       foes: () =>
         this.enemies
           .filter((e) => e.alive)
-          .map((e) => `${e.kind}:${Math.round(e.x)},${Math.round(e.y)}`)
+          .map((e) => `${e.mark ? "M" : ""}${e.kind}:${Math.round(e.x)},${Math.round(e.y)}`)
           .join(" "),
     };
   }
