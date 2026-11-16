@@ -51,7 +51,7 @@ type Bullet = {
   friendly: boolean;
   life: number;
   dmg: number;
-  grazed?: boolean;
+  grazeCd?: number;
 };
 
 type PickupKind = "spread" | "shield" | "speed";
@@ -163,6 +163,7 @@ export class Game {
   private stockShield = 0;
   private graze = 0;
   private grazeReady = false;
+  private grazeHot = false;
   private gateAt = 0;
   private waveName = "";
   private queue: Craft[] = [];
@@ -260,9 +261,9 @@ export class Game {
     this.powSpeed = 0;
     this.powShield = 0;
     this.shieldHits = 0;
-    this.stockSpread = 0;
-    this.stockSpeed = 0;
-    this.stockShield = 0;
+    this.stockSpread = 1;
+    this.stockSpeed = 1;
+    this.stockShield = 1;
     this.graze = 0;
     this.grazeReady = false;
     this.gateAt = 0;
@@ -436,11 +437,14 @@ export class Game {
     }
     for (const e of this.enemies) if (e.alive) this.tickEnemy(e, dt);
     this.separate();
+    this.grazeHot = false;
     for (const b of this.bullets) {
+      if (b.grazeCd) b.grazeCd = Math.max(0, b.grazeCd - dt);
       b.vy += b.ay * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
+      if (!b.friendly) this.noteGraze(b);
     }
     for (const p of this.pickups) {
       p.y += 38 * dt;
@@ -470,6 +474,7 @@ export class Game {
         this.score += bonus;
         this.float(this.w / 2, this.h * 0.32, `+${bonus}`, PAL.amber);
         this.wave += 1;
+        this.drop(this.w / 2, this.h * 0.42);
         this.beginWave();
         this.emit();
       }
@@ -985,7 +990,7 @@ export class Game {
       } else if (this.invuln <= 0 && this.hit(b.x, b.y, b.r, this.player.x, this.player.y, this.player.r)) {
         b.life = 0;
         this.hurtPlayer();
-      } else if (!b.friendly) this.noteGraze(b);
+      }
     }
     if (this.invuln <= 0) {
       for (const e of this.enemies) {
@@ -1008,24 +1013,29 @@ export class Game {
   }
 
   private noteGraze(b: Bullet) {
-    if (b.grazed || this.question) return;
-    const dx = b.x - this.player.x;
-    const dy = b.y - this.player.y;
-    const dist = Math.hypot(dx, dy);
-    const near = this.player.r + b.r + 26;
-    const far = this.player.r + b.r + 4;
-    if (dist > near || dist < far) return;
-    b.grazed = true;
-    this.score += 20;
-    this.graze = Math.min(1, this.graze + 0.17);
-    this.burst(b.x, b.y, PAL.amber, 3);
-    if (this.graze >= 1 && !this.grazeReady) {
-      this.grazeReady = true;
-      this.graze = 1;
-      this.banner = "擦彈就緒";
-      this.bannerT = 0.9;
-      this.float(this.player.x, this.player.y - 24, "就緒", PAL.amber);
-    }
+    if (this.question || b.life <= 0 || (b.grazeCd ?? 0) > 0) return;
+    const dist = Math.hypot(b.x - this.player.x, b.y - this.player.y);
+    const touch = this.player.r + b.r + 2;
+    const near = this.player.r + 58;
+    if (dist < touch || dist > near) return;
+    b.grazeCd = 0.09;
+    this.grazeHot = true;
+    this.score += 6;
+    this.graze = Math.min(1, this.graze + 0.16);
+    if (this.graze >= 1) this.grazeBurst();
+  }
+
+  private grazeBurst() {
+    this.graze = 0;
+    this.grazeReady = false;
+    for (const b of this.bullets) if (!b.friendly) b.life = 0;
+    this.powSpread = Math.max(this.powSpread, 3.6);
+    this.score += 80;
+    this.banner = "擦彈爆發";
+    this.bannerT = 1.05;
+    this.float(this.player.x, this.player.y - 30, "清彈 +散彈", PAL.amber);
+    this.burst(this.player.x, this.player.y, PAL.amber, 16);
+    this.sfx.good();
   }
 
   private hit(x1: number, y1: number, r1: number, x2: number, y2: number, r2: number) {
@@ -1074,11 +1084,6 @@ export class Game {
     this.pointerOn = false;
     this.gateAt = this.time;
     this.sfx.shield();
-    if (this.grazeReady) {
-      this.grazeReady = false;
-      this.graze = 0;
-      this.clearField();
-    }
     this.emit();
   }
 
@@ -1153,7 +1158,7 @@ export class Game {
       this.banner = "航道開啟";
       this.bannerT = 1.3;
       this.drop(e.x, e.y);
-    } else if (Math.random() < 0.2) this.drop(e.x, e.y);
+    } else if (Math.random() < 0.55) this.drop(e.x, e.y);
     this.emit();
   }
 
@@ -1327,20 +1332,7 @@ export class Game {
     ctx.fillStyle = sky;
     ctx.fillRect(-8, -8, this.w + 16, this.h + 16);
     if (night) this.drawStreet(ctx);
-    else {
-      this.blob(ctx, this.w * 0.22 + Math.sin(this.time * 0.15) * 12, this.h * 0.28, 200, "rgba(62,224,197,0.09)");
-      this.blob(ctx, this.w * 0.78, this.h * 0.62 + Math.cos(this.time * 0.12) * 16, 240, "rgba(240,162,2,0.06)");
-      this.layers.forEach((layer, i) => {
-        const depth = (i + 1) / this.layers.length;
-        ctx.globalAlpha = 0.28 + depth * 0.62;
-        ctx.fillStyle = i === 2 ? PAL.fg : "#9fb4c8";
-        for (const star of layer.stars) {
-          const x = ((star.x - shift * depth * 0.18) % 1 + 1) % 1;
-          ctx.fillRect(x * this.w, star.y * this.h, star.s, star.s);
-        }
-      });
-      ctx.globalAlpha = 1;
-    }
+    else this.drawVoid(ctx, shift);
     for (const p of this.pickups) this.drawPickup(ctx, p);
     for (const b of this.bullets) this.drawBullet(ctx, b);
     for (const e of this.enemies) this.drawEnemy(ctx, e);
@@ -1386,6 +1378,41 @@ export class Game {
     ctx.restore();
   }
 
+  private drawVoid(ctx: CanvasRenderingContext2D, shift: number) {
+    this.blob(ctx, this.w * 0.18 + Math.sin(this.time * 0.12) * 18, this.h * 0.3, 260, "rgba(62,224,197,0.16)");
+    this.blob(ctx, this.w * 0.8, this.h * 0.55 + Math.cos(this.time * 0.1) * 20, 300, "rgba(240,162,2,0.1)");
+    this.blob(ctx, this.w * 0.45, this.h * 0.12, 180, "rgba(120,90,220,0.14)");
+    const px = this.w * 0.74 + Math.sin(this.time * 0.05) * 10;
+    const py = this.h * 0.2;
+    this.blob(ctx, px, py, 120, "rgba(140,210,230,0.2)");
+    ctx.beginPath();
+    ctx.arc(px, py, 58, 0, Math.PI * 2);
+    ctx.fillStyle = "#1a4558";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(px + 22, py - 10, 50, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(7,16,28,0.72)";
+    ctx.fill();
+    this.layers.forEach((layer, i) => {
+      const depth = (i + 1) / this.layers.length;
+      ctx.globalAlpha = 0.35 + depth * 0.55;
+      ctx.fillStyle = i === 2 ? "#f4f7fb" : i === 1 ? "#9ec9ff" : "#6d7d90";
+      ctx.strokeStyle = "rgba(244,247,251,0.8)";
+      ctx.lineWidth = 1;
+      for (const star of layer.stars) {
+        const x = ((star.x - shift * depth * 0.18) % 1 + 1) % 1 * this.w;
+        const y = star.y * this.h;
+        if (i === 2 && !this.reduce) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + 10 + star.s * 3);
+          ctx.stroke();
+        } else ctx.fillRect(x, y, star.s, star.s);
+      }
+    });
+    ctx.globalAlpha = 1;
+  }
+
   private blob(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, color);
@@ -1397,31 +1424,53 @@ export class Game {
   }
 
   private drawStreet(ctx: CanvasRenderingContext2D) {
-    const curb = Math.max(28, this.w * 0.08);
-    ctx.fillStyle = "#17141a";
-    ctx.fillRect(0, 0, curb, this.h);
-    ctx.fillRect(this.w - curb, 0, curb, this.h);
-    ctx.fillStyle = "#2a241c";
-    ctx.fillRect(curb - 3, 0, 3, this.h);
-    ctx.fillRect(this.w - curb, 0, 3, this.h);
-    const scroll = this.road % 64;
-    ctx.fillStyle = "rgba(214, 196, 120, 0.35)";
-    for (let y = -64 + scroll; y < this.h; y += 64) {
-      ctx.fillRect(this.w / 2 - 2, y, 4, 26);
+    const curb = Math.max(36, this.w * 0.12);
+    this.blob(ctx, this.w * 0.8, 78, 90, "rgba(230,220,190,0.28)");
+    ctx.beginPath();
+    ctx.arc(this.w * 0.8, 72, 22, 0, Math.PI * 2);
+    ctx.fillStyle = "#efe6cf";
+    ctx.fill();
+    const scrollB = this.road * 0.85;
+    for (let side = -1; side <= 1; side += 2) {
+      for (let i = 0; i < 7; i++) {
+        const bh = 78 + (i % 3) * 18;
+        const y = ((i * 128 - scrollB) % (this.h + bh + 40)) - bh;
+        const bw = curb - 10;
+        const x = side < 0 ? 4 : this.w - 4 - bw;
+        ctx.fillStyle = i % 2 === 0 ? "#16141c" : "#221c28";
+        ctx.fillRect(x, y, bw, bh);
+        for (let wy = 0; wy < 3; wy++) {
+          for (let wx = 0; wx < 2; wx++) {
+            const lit = (i * 5 + wy * 2 + wx + (side > 0 ? 1 : 0)) % 4 !== 0;
+            ctx.fillStyle = lit ? "rgba(255, 186, 96, 0.8)" : "rgba(30, 34, 48, 0.7)";
+            ctx.fillRect(x + 5 + wx * (bw * 0.42), y + 10 + wy * 20, 6, 8);
+          }
+        }
+      }
     }
-    ctx.fillStyle = "rgba(232, 208, 120, 0.55)";
-    for (let i = 0; i < 6; i++) {
-      const y = ((i * 140 + this.road * 0.35) % (this.h + 80)) - 40;
-      ctx.fillRect(10, y, 6, 10);
-      ctx.fillRect(this.w - 16, y + 30, 6, 10);
+    ctx.fillStyle = "#121418";
+    ctx.fillRect(curb, 0, this.w - curb * 2, this.h);
+    ctx.fillStyle = "#3a3428";
+    ctx.fillRect(curb - 4, 0, 4, this.h);
+    ctx.fillRect(this.w - curb, 0, 4, this.h);
+    const scroll = this.road % 72;
+    ctx.fillStyle = "rgba(214, 196, 120, 0.4)";
+    for (let y = -72 + scroll; y < this.h; y += 72) ctx.fillRect(this.w / 2 - 2, y, 4, 28);
+    ctx.fillStyle = "rgba(180, 210, 200, 0.05)";
+    ctx.fillRect(curb, this.h * 0.55, this.w - curb * 2, this.h * 0.45);
+    if (!this.reduce) {
+      ctx.strokeStyle = "rgba(190, 210, 220, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < 48; i++) {
+        const x = (i * 89 + this.road * 2.4) % this.w;
+        const y = (i * 47 + this.road * 5.5) % this.h;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 3, y + 16);
+      }
+      ctx.stroke();
     }
-    this.blob(ctx, this.w * 0.5, this.h * 0.15, 180, "rgba(125, 206, 106, 0.05)");
-    this.layers[2]?.stars.forEach((star) => {
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = "#d7e2ea";
-      ctx.fillRect(star.x * this.w, (star.y * this.h * 0.35) % (this.h * 0.4), 1.4, 1.4);
-    });
-    ctx.globalAlpha = 1;
+    this.blob(ctx, this.w * 0.5, this.h * 0.2, 200, "rgba(125, 206, 106, 0.06)");
   }
 
   private drawShowcase(ctx: CanvasRenderingContext2D) {
@@ -1449,13 +1498,17 @@ export class Game {
 
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const p = this.player;
+    const night = this.theater === "night";
+    const frame = Math.floor(this.time * 8) % 4;
     if (!this.reduce && this.invuln > 0 && Math.floor(this.invuln * 16) % 2 === 0) return;
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.tilt);
-    ctx.globalAlpha = this.reduce && this.invuln > 0 ? 0.65 : 1;
-    const night = this.theater === "night";
-    const frame = Math.floor(this.time * 8) % 4;
+    if (this.powSpeed > 0 && !this.reduce) {
+      ctx.globalAlpha = 0.28;
+      this.art.draw(ctx, night ? "survivor" : "ship", frame, 0, 14, night ? 74 : 92);
+      ctx.globalAlpha = 1;
+    }
     const painted = this.art.draw(ctx, night ? "survivor" : "ship", frame, 0, 0, night ? 74 : 92);
     if (!painted) {
     const flick = 0.75 + Math.sin(this.time * 28) * 0.25;
@@ -1521,6 +1574,17 @@ export class Game {
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(0, 0, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (this.status === "play") {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.strokeStyle = this.grazeHot ? PAL.amber : "rgba(240,162,2,0.45)";
+      ctx.globalAlpha = this.grazeHot ? 0.95 : 0.55;
+      ctx.lineWidth = this.grazeHot ? 2.4 : 1.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, p.r + 34 + this.graze * 8, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -1618,6 +1682,12 @@ export class Game {
     ctx.strokeStyle = b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? (lob ? "#c6f59a" : "#8dce6a") : PAL.rose;
     ctx.lineWidth = b.friendly ? 3 : lob ? 4.2 : 2.6;
     ctx.lineCap = "round";
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.friendly ? 5 : lob ? 8 : 6, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.beginPath();
     ctx.moveTo(b.x, b.y);
     ctx.lineTo(b.x - (b.vx / mag) * len, b.y - (b.vy / mag) * len);

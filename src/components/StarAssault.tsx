@@ -360,10 +360,10 @@ export function StarAssault() {
             </div>
           )}
           <div className="mt-2 flex items-center gap-2">
-            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-2" aria-label="擦彈">
+            <div className="h-2 w-36 overflow-hidden rounded-full bg-surface-2" aria-label="擦彈">
               <div className="h-full bg-accent" style={{ width: `${Math.round(snap.graze * 100)}%` }} />
             </div>
-            <span className="text-xs text-muted">{snap.grazeReady ? "擦彈就緒" : "擦彈"}</span>
+            <span className="text-xs text-muted">貼近敵彈，滿了清場</span>
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             {snap.powers.spread > 0 && (
@@ -388,8 +388,8 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "WASD 移動。這一波的陣型會寫在上面。Z 散彈、X 護盾、C 加速，撿到先存著，自己決定何時按。"
-            : "WASD 移動。敵艦按陣型進來。Z 散彈、X 護盾、C 加速，撿到不會自己倒數。"}
+            ? "船外黃圈是擦彈。貼著敵彈走，圈滿會清彈並打開散彈。左下三個技能開局就能按。"
+            : "船外黃圈是擦彈。貼著敵彈走，圈滿會清彈並打開散彈。左下三個技能開局就能按。"}
         </p>
       )}
 
@@ -452,7 +452,7 @@ export function StarAssault() {
               <button
                 key={kind}
                 type="button"
-                className={`pointer-events-auto min-h-11 min-w-14 rounded-xl border px-3 text-sm ${on ? "border-primary text-fg" : "border-border text-muted"} bg-surface/90`}
+                className={`pointer-events-auto min-h-11 min-w-14 rounded-xl border px-3 text-sm ${on ? "border-primary bg-primary/15 text-fg" : stock > 0 ? "border-accent text-fg" : "border-border text-muted"} bg-surface/90`}
                 onClick={() => gameRef.current?.usePower(kind)}
               >
                 {label} {stock}
