@@ -15,7 +15,7 @@ export function freshSave(): Save {
 }
 
 function asMode(v: unknown): ChallengeMode {
-  return v === "words" || v === "math" || v === "mix" ? v : "mix";
+  return v === "words" || v === "math" || v === "mix" || v === "drill" ? v : "mix";
 }
 
 function asTheater(v: unknown): Theater {

@@ -42,6 +42,7 @@ type Enemy = {
   mark: boolean;
   guard: number;
   wind: number;
+  ask: boolean;
 };
 
 type Bullet = {
@@ -176,6 +177,8 @@ export class Game {
   private shot: "needle" | "orb" | "beam" = "needle";
   private gateAt = 0;
   private waveName = "";
+  private asksLeft = 0;
+  private gate: Enemy | null = null;
   private queue: Craft[] = [];
   private shake = 0;
   private hurtFlash = 0;
@@ -264,6 +267,7 @@ export class Game {
     this.floaters = [];
     this.built = null;
     this.question = null;
+    this.gate = null;
     this.fireCd = 0.2;
     this.muzzle = 0;
     this.invuln = 1.2;
@@ -301,6 +305,7 @@ export class Game {
     this.status = "attract";
     this.paused = false;
     this.question = null;
+    this.gate = null;
     this.built = null;
     this.enemies = [];
     this.bullets = [];
@@ -423,6 +428,7 @@ export class Game {
     this.queue = [];
     this.spawningBoss = this.wave % 3 === 0;
     if (this.spawningBoss) {
+      this.asksLeft = 0;
       this.leftToSpawn = 1;
       this.spawnGap = 0.65;
       this.waveName = this.theater === "night" ? "屍王" : "旗艦";
@@ -430,10 +436,11 @@ export class Game {
     } else {
       const plan = this.formationPlan();
       this.queue = plan.crafts;
+      this.asksLeft = this.mode === "drill" ? 3 : 2;
       this.leftToSpawn = plan.crafts.length;
       this.spawnGap = 0.12;
-    this.waveName = `${plan.title} · 信標`;
-    this.banner = "打缺口，別讓它溜走";
+      this.waveName = `${plan.title} · 題標`;
+      this.banner = this.mode === "drill" ? "三隻題標，半血要答" : "兩隻題標，半血要答";
     }
     this.bannerT = 1.6;
     this.clearHold = 0;
@@ -711,7 +718,13 @@ export class Game {
       mark: Boolean(craft.mark),
       guard: Math.PI / 2,
       wind: 0,
+      ask: false,
     };
+    if (!craft.mark && this.asksLeft > 0) {
+      enemy.ask = true;
+      enemy.quiz = "quick";
+      this.asksLeft -= 1;
+    }
     this.enemies.push(enemy);
   }
 
@@ -747,6 +760,7 @@ export class Game {
       mark: false,
       guard: 0,
       wind: 0,
+      ask: false,
     });
     this.banner = `${this.bossTitle(quiz)} · 血線鎖盾`;
     this.bannerT = 1.8;
@@ -1258,6 +1272,17 @@ export class Game {
         return;
       }
     }
+    if (e.ask && !e.locked && e.kind !== "boss") {
+      const line = Math.max(1, Math.round(e.maxHp * 0.5));
+      if (e.hp <= line) {
+        e.hp = line;
+        if (!this.question) {
+          e.locked = true;
+          this.openGate(e);
+        }
+        return;
+      }
+    }
     if (e.hp <= 0) {
       e.hp = 0;
       this.killEnemy(e);
@@ -1266,15 +1291,17 @@ export class Game {
 
   private openGate(e: Enemy) {
     const built = makeQuestion(e.quiz, this.words);
+    const boss = e.kind === "boss";
+    this.gate = e;
     this.built = built;
     this.question = {
       kind: built.kind,
       prompt: built.prompt,
       hint: built.hint,
       choices: built.choices,
-      phase: e.phase + 1,
-      phases: PHASES.length,
-      bossName: this.bossTitle(e.quiz),
+      phase: boss ? e.phase + 1 : 1,
+      phases: boss ? PHASES.length : 1,
+      bossName: boss ? this.bossTitle(e.quiz) : "題標",
       wrong: false,
     };
     this.pointerOn = false;
@@ -1284,8 +1311,9 @@ export class Game {
   }
 
   private failGate() {
-    const boss = this.liveBoss();
-    const kind = boss?.quiz ?? this.built?.kind ?? "word";
+    const foe = this.gate ?? this.liveBoss();
+    const kind = foe?.quiz ?? this.built?.kind ?? "word";
+    const boss = foe?.kind === "boss";
     const built = makeQuestion(kind, this.words);
     this.built = built;
     this.question = {
@@ -1293,9 +1321,9 @@ export class Game {
       prompt: built.prompt,
       hint: built.hint,
       choices: built.choices,
-      phase: (boss?.phase ?? 0) + 1,
-      phases: PHASES.length,
-      bossName: this.bossTitle(kind),
+      phase: boss ? (foe?.phase ?? 0) + 1 : 1,
+      phases: boss ? PHASES.length : 1,
+      bossName: boss ? this.bossTitle(kind) : "題標",
       wrong: true,
     };
     this.gateAt = this.time;
@@ -1305,31 +1333,43 @@ export class Game {
   }
 
   private solveGate() {
-    const boss = this.liveBoss();
+    const foe = this.gate ?? this.liveBoss();
     const fast = this.time - this.gateAt < 4.2;
     this.built = null;
     this.question = null;
-    this.score += 480;
-    if (boss) {
-      boss.locked = false;
-      boss.phase += 1;
-      let note = boss.phase === 1 ? "預判連射" : "外環壓上";
+    this.gate = null;
+    this.score += foe?.kind === "boss" ? 480 : 220;
+    if (foe && foe.kind !== "boss") {
+      foe.locked = false;
+      foe.ask = false;
+      foe.hp = 0;
+      this.banner = "小題過關";
+      this.bannerT = 1.1;
+      this.killEnemy(foe);
+      this.sfx.good();
+      this.emit();
+      return;
+    }
+    if (foe) {
+      foe.locked = false;
+      foe.phase += 1;
+      let note = foe.phase === 1 ? "預判連射" : "外環壓上";
       if (fast) {
-        const chunk = Math.max(8, Math.round(boss.maxHp * 0.08));
-        const nextLine = boss.phase < PHASES.length ? boss.maxHp * PHASES[boss.phase]! : 1;
-        boss.hp = Math.max(nextLine, boss.hp - chunk);
+        const chunk = Math.max(8, Math.round(foe.maxHp * 0.08));
+        const nextLine = foe.phase < PHASES.length ? foe.maxHp * PHASES[foe.phase]! : 1;
+        foe.hp = Math.max(nextLine, foe.hp - chunk);
         this.score += 220;
         note = `手快 · ${note}`;
-        this.float(boss.x, boss.y - 48, `-${chunk}`, PAL.amber);
+        this.float(foe.x, foe.y - 48, `-${chunk}`, PAL.amber);
       }
-      if (boss.phase >= 2) this.summonRing();
-      if (boss.hp <= 1 && boss.phase >= PHASES.length) {
-        boss.hp = 0;
-        this.killEnemy(boss);
+      if (foe.phase >= 2) this.summonRing();
+      if (foe.hp <= 1 && foe.phase >= PHASES.length) {
+        foe.hp = 0;
+        this.killEnemy(foe);
         return;
       }
-      this.float(boss.x, boss.y - 28, "解鎖 +480", PAL.amber);
-      this.burst(boss.x, boss.y, PAL.amber, 16);
+      this.float(foe.x, foe.y - 28, "解鎖 +480", PAL.amber);
+      this.burst(foe.x, foe.y, PAL.amber, 16);
       this.banner = note;
     } else this.banner = "護盾解開";
     this.bannerT = 1.35;
@@ -1341,6 +1381,11 @@ export class Game {
     if (!e.alive) return;
     e.alive = false;
     e.locked = false;
+    if (this.gate === e) {
+      this.gate = null;
+      this.question = null;
+      this.built = null;
+    }
     const pts = e.kind === "boss" ? 2000 : e.mark ? 460 : e.kind === "tank" ? 220 : e.kind === "dart" ? 140 : 100;
     this.score += pts;
     this.float(e.x, e.y, e.mark ? `信標 +${pts}` : `+${pts}`, e.kind === "boss" || e.mark ? PAL.amber : PAL.fg);
@@ -2068,6 +2113,22 @@ export class Game {
   }
 
   private drawTell(ctx: CanvasRenderingContext2D, e: Enemy) {
+    if (e.ask) {
+      ctx.strokeStyle = e.locked ? "#fff4c8" : PAL.amber;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r + 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#1a1204";
+      ctx.beginPath();
+      ctx.arc(e.r + 2, -e.r - 2, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PAL.amber;
+      ctx.font = `700 12px ${FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("題", e.r + 2, -e.r - 1);
+    }
     if (e.mark) {
       ctx.globalAlpha = 0.35;
       ctx.strokeStyle = PAL.amber;
@@ -2272,6 +2333,7 @@ export class Game {
       },
     };
     window.__starlex = {
+      asks: () => this.enemies.filter((e) => e.alive && e.ask).map((e) => `${e.kind}@${Math.round(e.x)},${Math.round(e.y)}`),
       skipToBoss: () => {
         if (this.status !== "play") this.start();
         this.enemies = [];

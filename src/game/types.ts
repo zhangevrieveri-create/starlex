@@ -1,6 +1,6 @@
-export type ChallengeMode = "mix" | "words" | "math";
+export type ChallengeMode = "mix" | "words" | "math" | "drill";
 export type Theater = "space" | "night";
-export type QuizKind = "word" | "math";
+export type QuizKind = "word" | "math" | "quick";
 
 export type Word = {
   id: string;

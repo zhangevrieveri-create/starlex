@@ -29,12 +29,37 @@ export const DEFAULT_WORDS: Word[] = [
   { id: "clever", term: "clever", meaning: "聰明的" },
   { id: "journey", term: "journey", meaning: "旅程" },
   { id: "lantern", term: "lantern", meaning: "燈籠" },
+  { id: "apple", term: "apple", meaning: "蘋果" },
+  { id: "bread", term: "bread", meaning: "麵包" },
+  { id: "water", term: "water", meaning: "水" },
+  { id: "school", term: "school", meaning: "學校" },
+  { id: "friend", term: "friend", meaning: "朋友" },
+  { id: "music", term: "music", meaning: "音樂" },
+  { id: "window", term: "window", meaning: "窗戶" },
+  { id: "garden", term: "garden", meaning: "花園" },
+  { id: "island", term: "island", meaning: "島嶼" },
+  { id: "storm", term: "storm", meaning: "暴風雨" },
+  { id: "shadow", term: "shadow", meaning: "影子" },
+  { id: "mirror", term: "mirror", meaning: "鏡子" },
+  { id: "candle", term: "candle", meaning: "蠟燭" },
+  { id: "ocean", term: "ocean", meaning: "海洋" },
+  { id: "mountain", term: "mountain", meaning: "山" },
+  { id: "clock", term: "clock", meaning: "時鐘" },
+  { id: "letter", term: "letter", meaning: "信" },
+  { id: "dream", term: "dream", meaning: "夢" },
+  { id: "winter", term: "winter", meaning: "冬天" },
+  { id: "summer", term: "summer", meaning: "夏天" },
+  { id: "silver", term: "silver", meaning: "銀" },
+  { id: "golden", term: "golden", meaning: "金的" },
+  { id: "secret", term: "secret", meaning: "秘密" },
 ];
 
 const FILLERS = ["星塵", "光年", "船塢", "信標", "潮汐", "地圖", "時間", "城市", "風", "書"];
 
 export function bossName(kind: QuizKind): string {
-  return kind === "word" ? "詞核哨衛" : "算式巨像";
+  if (kind === "word") return "詞核哨衛";
+  if (kind === "quick") return "題標";
+  return "算式巨像";
 }
 
 export function newWordId(): string {
@@ -62,6 +87,7 @@ function shuffle<T>(list: T[], rng: () => number): T[] {
 
 export function makeQuestion(kind: QuizKind, words: Word[], rng: () => number = Math.random): BuiltQuestion {
   if (kind === "math") return makeMath(rng);
+  if (kind === "quick") return makeQuick(words, rng);
   return makeWord(words, rng);
 }
 
@@ -98,6 +124,11 @@ function makeWord(words: Word[], rng: () => number): BuiltQuestion {
 }
 
 function makeMath(rng: () => number): BuiltQuestion {
+  if (rng() < 0.3) {
+    const a = 2 + Math.floor(rng() * 8);
+    const b = 2 + Math.floor(rng() * 8);
+    return numberQuestion(`${a} × ${b}`, a * b, "乘法表，選出得數", rng);
+  }
   const add = rng() < 0.55;
   let a = 0;
   let b = 0;
@@ -114,23 +145,71 @@ function makeMath(rng: () => number): BuiltQuestion {
     ans = a - b;
     prompt = `${a} − ${b}`;
   }
+  return numberQuestion(prompt, ans, "100 以內，選出得數", rng);
+}
+
+function makeQuick(words: Word[], rng: () => number): BuiltQuestion {
+  const roll = rng();
+  if (roll < 0.4) {
+    const add = rng() < 0.6;
+    const a = Math.floor(rng() * 21);
+    const b = add ? Math.floor(rng() * (21 - a)) : Math.floor(rng() * (a + 1));
+    const ans = add ? a + b : a - b;
+    return numberQuestion(`${a} ${add ? "+" : "−"} ${b}`, ans, "20 以內，選出得數", rng, 20);
+  }
+  if (roll < 0.65) return makeCompare(rng);
+  if (roll < 0.85) return makeNext(rng);
+  const word = makeWord(words, rng);
+  return { ...word, kind: "quick" };
+}
+
+function makeCompare(rng: () => number): BuiltQuestion {
+  const same = rng() < 0.22;
+  const a = Math.floor(rng() * 31);
+  const b = same ? a : Math.floor(rng() * 31);
+  const ans = a === b ? "相等" : a > b ? "大於" : "小於";
+  const choices = shuffle(["大於", "小於", "相等", "差不多"], rng);
+  return {
+    kind: "quick",
+    prompt: `${a} ？ ${b}`,
+    hint: "選出兩者的關係",
+    choices,
+    answer: Math.max(0, choices.indexOf(ans)),
+  };
+}
+
+function makeNext(rng: () => number): BuiltQuestion {
+  const step = [1, 2, 3, 5, 10][Math.floor(rng() * 5)] ?? 2;
+  const start = Math.floor(rng() * 8);
+  const seq = [start, start + step, start + step * 2];
+  const ans = start + step * 3;
+  return numberQuestion(`${seq.join("，")}，？`, ans, "找出下一個數", rng, 40);
+}
+
+function numberQuestion(
+  prompt: string,
+  ans: number,
+  hint: string,
+  rng: () => number,
+  cap = 100,
+): BuiltQuestion {
   const wrongs = new Set<number>();
   const deltas = [1, -1, 2, -2, 10, -10, 5, -5, 3, -3, 9, -9, 4];
   for (const d of deltas) {
     const v = ans + d;
-    if (v >= 0 && v <= 100 && v !== ans) wrongs.add(v);
+    if (v >= 0 && v <= cap && v !== ans) wrongs.add(v);
     if (wrongs.size >= 3) break;
   }
   let guard = 0;
   while (wrongs.size < 3 && guard++ < 30) {
-    const v = Math.floor(rng() * 101);
+    const v = Math.floor(rng() * (cap + 1));
     if (v !== ans) wrongs.add(v);
   }
   const ordered = shuffle([String(ans), ...[...wrongs].slice(0, 3).map(String)], rng);
   return {
-    kind: "math",
+    kind: prompt.includes("×") || hint.includes("100") ? "math" : "quick",
     prompt,
-    hint: "100 以內，選出得數",
+    hint,
     choices: ordered,
     answer: Math.max(0, ordered.indexOf(String(ans))),
   };

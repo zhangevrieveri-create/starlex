@@ -28,9 +28,10 @@ const THEATERS: { id: Theater; label: string; copy: string }[] = [
 ];
 
 const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
-  { id: "mix", label: "混合", copy: "第 1、3、5… 隻首領考單詞，雙數考百以內加減。" },
-  { id: "words", label: "單詞", copy: "每隻首領都從你的詞庫抽題。" },
-  { id: "math", label: "數學", copy: "每隻首領都出 100 以內的加法或減法。" },
+  { id: "mix", label: "混合", copy: "首領輪流考單詞和百以內加減（含乘法）。每一波另有兩隻題標，半血出簡單題。" },
+  { id: "words", label: "單詞", copy: "首領都從詞庫抽。題標仍是 20 以內、比大小，或一道簡單詞。" },
+  { id: "math", label: "數學", copy: "首領考百以內加減，大約三成是乘法表。小怪題更短。" },
+  { id: "drill", label: "速答", copy: "每一波三隻題標。20 以內、比大小、找規律、簡單詞。首領仍是混合題。" },
 ];
 
 export function StarAssault() {
@@ -212,8 +213,8 @@ export function StarAssault() {
               />
               <p className="mt-3 text-base leading-relaxed text-muted">
                 {save.theater === "night"
-                  ? "屍群會停在遠處開火。小兵直接打。屍王血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血。"
-                  : "小兵直接打掉。首領血量掉到鎖點會升起護盾，答對單詞或 100 以內加減，才能繼續扣血、開往下一波。"}
+                  ? "屍群會停在遠處開火。帶問號的小怪半血會出簡單題。屍王血量掉到鎖點才是大題。"
+                  : "帶問號的小怪半血會出簡單題。首領血量掉到鎖點會升起護盾，答對才能繼續扣血。"}
               </p>
               {best && (
                 <p className="mt-4 text-sm text-accent">
@@ -402,13 +403,15 @@ export function StarAssault() {
             className="pointer-events-auto w-full max-w-md rounded-2xl border border-border bg-surface/95 p-4"
           >
             <p className="font-display text-sm text-accent">
-              {question.kind === "word" ? "單詞鎖" : "算式鎖"} · {question.bossName} · 第 {question.phase}/
+              {question.kind === "word" ? "單詞鎖" : question.kind === "quick" ? "小題" : "算式鎖"} · {question.bossName} · 第 {question.phase}/
               {question.phases} 道
             </p>
             <h2 id="quiz-prompt" className="mt-2 break-words text-center font-display text-3xl font-bold text-fg">
               {question.prompt}
             </h2>
-            <p className="mt-1 text-center text-sm text-muted">場面還在慢速走。答得快，解開時多扣一截。</p>
+            <p className="mt-1 text-center text-sm text-muted">
+              {question.kind === "quick" ? "答對，這隻題標才倒下。答錯就換一題。" : "場面還在慢速走。答得快，解開時多扣一截。"}
+            </p>
             {question.wrong && <p className="mt-1 text-center text-sm text-danger">這題換新的。答對才繼續扣血。</p>}
             <div className="mt-3 grid gap-2">
               {question.choices.map((choice, index) => (
