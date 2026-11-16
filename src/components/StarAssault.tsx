@@ -388,8 +388,8 @@ export function StarAssault() {
       {screen === "play" && hint && !question && !paused && !over && (
         <p className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 text-center text-sm text-muted safe-bottom">
           {save.theater === "night"
-            ? "金色缺口轉到你這邊，信標才吃傷害。它會往下逃。空白鍵或「貫」無視護罩。"
-            : "金色缺口轉到你這邊，信標才吃傷害。它會往下逃。空白鍵或「貫」無視護罩。"}
+            ? "Q 或「換彈」切光針、重彈、光束。光針快，重彈慢但疼，光束又長又亮。"
+            : "Q 或「換彈」切光針、重彈、光束。光針快，重彈慢但疼，光束又長又亮。"}
         </p>
       )}
 
@@ -429,6 +429,13 @@ export function StarAssault() {
 
       {screen === "play" && snap && !paused && !over && (
         <div className="absolute inset-x-0 bottom-0 z-10 flex justify-start gap-2 px-3 pb-3 safe-bottom">
+          <button
+            type="button"
+            className="pointer-events-auto min-h-11 min-w-16 rounded-xl border border-accent bg-surface/90 px-3 text-sm text-fg"
+            onClick={() => gameRef.current?.cycleShot()}
+          >
+            換彈 {snap.shot}
+          </button>
           <button
             type="button"
             className={`pointer-events-auto min-h-11 min-w-16 rounded-xl border px-3 text-sm ${snap.pierce <= 0 ? "border-accent text-fg" : "border-border text-muted"} bg-surface/90`}

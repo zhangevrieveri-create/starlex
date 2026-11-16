@@ -56,6 +56,7 @@ type Bullet = {
   grazeCd?: number;
   pierce?: boolean;
   hurt?: Set<Enemy>;
+  look?: "needle" | "orb" | "beam" | "shard" | "blob";
 };
 
 type PickupKind = "spread" | "shield" | "speed";
@@ -170,6 +171,8 @@ export class Game {
   private grazeReady = false;
   private grazeHot = false;
   private pierceCd = 0;
+  private kick = 0;
+  private shot: "needle" | "orb" | "beam" = "needle";
   private gateAt = 0;
   private waveName = "";
   private queue: Craft[] = [];
@@ -273,6 +276,8 @@ export class Game {
     this.graze = 0;
     this.grazeReady = false;
     this.pierceCd = 0;
+    this.kick = 0;
+    this.shot = "needle";
     this.gateAt = 0;
     this.waveName = "";
     this.queue = [];
@@ -349,6 +354,10 @@ export class Game {
       }
       if (e.code === "KeyC") {
         this.usePower("speed");
+        return;
+      }
+      if (e.code === "KeyQ") {
+        this.cycleShot();
         return;
       }
     }
@@ -467,6 +476,7 @@ export class Game {
     if (this.powSpread > 0) this.powSpread -= dt;
     if (this.powSpeed > 0) this.powSpeed -= dt;
     if (this.pierceCd > 0) this.pierceCd -= dt;
+    this.kick = Math.max(0, this.kick - dt * 7);
     if (this.particles.length < 150 && Math.random() < 0.7) {
       this.particles.push({
         x: this.player.x - 4,
@@ -539,27 +549,71 @@ export class Game {
   }
 
   private fire() {
-    this.fireCd = this.powSpread > 0 ? 0.11 : 0.16;
+    const spread = this.powSpread > 0;
     const wide = this.graze > 0.7 ? 1.28 : 1;
-    const angles = this.powSpread > 0 ? [-0.36, -0.18, 0, 0.18, 0.36].map((a) => a * wide) : [0];
-    const noseY = this.player.y - 16;
+    let cd = 0.14;
+    let angles = [0];
+    let speed = 700;
+    let dmg = 1;
+    let r = 2.6;
+    let life = 0.85;
+    let look: Bullet["look"] = "needle";
+    if (this.shot === "orb") {
+      cd = spread ? 0.18 : 0.26;
+      angles = spread ? [-0.28, 0, 0.28].map((a) => a * wide) : [0];
+      speed = 430;
+      dmg = 3;
+      r = 8;
+      life = 1.35;
+      look = "orb";
+    } else if (this.shot === "beam") {
+      cd = spread ? 0.07 : 0.09;
+      angles = spread ? [-0.1, 0.1] : [0];
+      speed = 980;
+      dmg = 1;
+      r = 5;
+      life = 0.42;
+      look = "beam";
+    } else {
+      cd = spread ? 0.08 : 0.12;
+      angles = spread ? [-0.34, -0.17, 0, 0.17, 0.34].map((a) => a * wide) : [0];
+      speed = 760;
+      look = "needle";
+    }
+    this.fireCd = cd;
+    const noseY = this.player.y - 18;
     for (const a of angles) {
-      if (this.bullets.length > 90) break;
+      if (this.bullets.length > 96) break;
       const ang = -Math.PI / 2 + a;
       this.bullets.push({
-        x: this.player.x + Math.sin(a) * 6,
+        x: this.player.x + Math.sin(a) * 8,
         y: noseY,
-        vx: Math.cos(ang) * 640,
-        vy: Math.sin(ang) * 640,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
         ay: 0,
-        r: 3.2,
+        r,
         friendly: true,
-        life: 1.35,
-        dmg: 1,
+        life,
+        dmg,
+        look,
       });
     }
-    this.muzzle = 0.07;
+    this.muzzle = 0.08;
+    this.kick = 1;
     this.sfx.shoot();
+  }
+
+  cycleShot() {
+    if (this.status !== "play" || this.paused || this.question) return;
+    this.shot = this.shot === "needle" ? "orb" : this.shot === "orb" ? "beam" : "needle";
+    this.banner = this.shotLabel();
+    this.bannerT = 0.7;
+    this.sfx.pickup();
+    this.emit();
+  }
+
+  private shotLabel() {
+    return this.shot === "orb" ? "重彈" : this.shot === "beam" ? "光束" : "光針";
   }
 
   private formationPlan(): { title: string; crafts: Craft[] } {
@@ -1445,10 +1499,11 @@ export class Game {
         );
       }
     }
-    for (const b of this.bullets) this.drawBullet(ctx, b);
+    for (const b of this.bullets) if (b.friendly) this.drawBullet(ctx, b);
     for (const e of this.enemies) this.drawEnemy(ctx, e);
     if (this.status === "attract") this.drawShowcase(ctx);
     else this.drawPlayer(ctx);
+    for (const b of this.bullets) if (!b.friendly) this.drawBullet(ctx, b);
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life / p.max);
       ctx.fillStyle = p.color;
@@ -1624,6 +1679,7 @@ export class Game {
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.tilt);
+    ctx.translate(0, this.kick * 7);
     if (this.powSpeed > 0 && !this.reduce) {
       ctx.globalAlpha = 0.28;
       this.art.draw(ctx, night ? "survivor" : "ship", frame, 0, 14, night ? 74 : 92);
@@ -1671,18 +1727,25 @@ export class Game {
     ctx.fill();
     }
     if (this.muzzle > 0) {
-      const a = this.muzzle / 0.07;
+      const a = Math.min(1, this.muzzle / 0.08);
+      const flash = this.shot === "orb" ? PAL.amber : this.shot === "beam" ? "#ffffff" : PAL.cyan;
+      ctx.globalAlpha = 0.9 * a;
+      ctx.fillStyle = flash;
+      ctx.beginPath();
+      ctx.moveTo(0, -46);
+      ctx.lineTo(10, -16);
+      ctx.lineTo(0, -24);
+      ctx.lineTo(-10, -16);
+      ctx.closePath();
+      ctx.fill();
       ctx.globalAlpha = a;
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.moveTo(0, -28);
-      ctx.lineTo(7, -16);
-      ctx.lineTo(0, -20);
-      ctx.lineTo(-7, -16);
+      ctx.moveTo(0, -38);
+      ctx.lineTo(4, -18);
+      ctx.lineTo(0, -22);
+      ctx.lineTo(-4, -18);
       ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(0, -18, 8 * a + 2, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
@@ -1835,43 +1898,89 @@ export class Game {
 
   private drawBullet(ctx: CanvasRenderingContext2D, b: Bullet) {
     const mag = Math.hypot(b.vx, b.vy) || 1;
-    const night = this.theater === "night";
-    const lob = b.ay > 8;
-    const len = b.pierce ? 36 : b.friendly ? 14 : lob ? 16 : 11;
-    ctx.strokeStyle = b.pierce ? PAL.amber : b.friendly ? (night ? "#f3e2b6" : PAL.cyan) : night ? (lob ? "#c6f59a" : "#8dce6a") : PAL.rose;
-    ctx.lineWidth = b.pierce ? 6 : b.friendly ? 3 : lob ? 4.2 : 2.6;
-    ctx.lineCap = "round";
-    ctx.globalAlpha = 0.35;
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, b.friendly ? 5 : lob ? 8 : 6, 0, Math.PI * 2);
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.beginPath();
-    ctx.moveTo(b.x, b.y);
-    ctx.lineTo(b.x - (b.vx / mag) * len, b.y - (b.vy / mag) * len);
-    ctx.stroke();
-    if (b.friendly || lob) {
-      ctx.fillStyle = b.friendly ? "#ffffff" : "#e7ffc4";
+    const ux = b.vx / mag;
+    const uy = b.vy / mag;
+    const look = b.pierce ? "beam" : (b.look ?? (b.friendly ? "needle" : b.ay > 8 ? "blob" : "shard"));
+    const palette =
+      look === "orb"
+        ? ["#ffe08a", "#6a3200", "#fff7d6"]
+        : look === "beam"
+          ? ["#d7f4ff", "#1248c8", "#ffffff"]
+          : look === "blob"
+            ? ["#c6f56a", "#1c3d08", "#f4ffd8"]
+            : look === "shard"
+              ? ["#ff5d7a", "#4a0618", "#ffd0d8"]
+              : ["#7ef6ff", "#06343c", "#ffffff"];
+    const [fill, edge, core] = palette;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(Math.atan2(uy, ux) + Math.PI / 2);
+    if (look === "orb" || look === "blob") {
+      const rad = look === "orb" ? 8 : 7;
+      ctx.fillStyle = edge;
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.friendly ? 1.6 : b.r * 0.72, 0, Math.PI * 2);
+      ctx.arc(0, 0, rad + 2.2, 0, Math.PI * 2);
       ctx.fill();
-    }
-    if (lob) {
-      let x = b.x;
-      let y = b.y;
-      let vy = b.vy;
-      for (let i = 1; i <= 7; i++) {
-        vy += b.ay * 0.07;
-        x += b.vx * 0.07;
-        y += vy * 0.07;
-        ctx.globalAlpha = 0.45 - i * 0.05;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(0, 0, rad, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(-1.2, -1.4, rad * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+      if (look === "blob") {
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = fill;
         ctx.beginPath();
-        ctx.arc(x, y, Math.max(1.2, b.r * 0.45 - i * 0.3), 0, Math.PI * 2);
+        ctx.arc(0, 12, 3.4, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 1;
+    } else if (look === "shard") {
+      ctx.fillStyle = edge;
+      ctx.beginPath();
+      ctx.moveTo(0, -11);
+      ctx.lineTo(7, 0);
+      ctx.lineTo(0, 9);
+      ctx.lineTo(-7, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(0, -8);
+      ctx.lineTo(4.5, 0);
+      ctx.lineTo(0, 6.5);
+      ctx.lineTo(-4.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = core;
+      ctx.fillRect(-1.1, -3, 2.2, 5);
+    } else {
+      const len = look === "beam" ? 34 : 20;
+      const rad = look === "beam" ? 4.4 : 2.3;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = rad * 2 + 3.2;
+      ctx.beginPath();
+      ctx.moveTo(0, 2);
+      ctx.lineTo(0, -len);
+      ctx.stroke();
+      ctx.strokeStyle = fill;
+      ctx.lineWidth = rad * 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 2);
+      ctx.lineTo(0, -len);
+      ctx.stroke();
+      ctx.strokeStyle = core;
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = Math.max(1.3, rad * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -len * 0.72);
+      ctx.stroke();
     }
+    ctx.restore();
   }
 
   private drawPickup(ctx: CanvasRenderingContext2D, p: Pickup) {
@@ -1926,6 +2035,7 @@ export class Game {
       grazeReady: this.grazeReady,
       pierce: Math.max(0, this.pierceCd),
       mark: this.enemies.some((e) => e.alive && e.mark),
+      shot: this.shotLabel(),
       question: this.question,
       muted: this.sfx.muted,
     };

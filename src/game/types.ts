@@ -63,6 +63,7 @@ export type Snap = {
   grazeReady: boolean;
   pierce: number;
   mark: boolean;
+  shot: string;
   question: PublicQuestion | null;
   muted: boolean;
 };
