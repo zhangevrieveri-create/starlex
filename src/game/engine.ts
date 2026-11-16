@@ -41,6 +41,7 @@ type Enemy = {
   hold: number;
   mark: boolean;
   guard: number;
+  wind: number;
 };
 
 type Bullet = {
@@ -424,7 +425,7 @@ export class Game {
     if (this.spawningBoss) {
       this.leftToSpawn = 1;
       this.spawnGap = 0.65;
-      this.waveName = this.theater === "night" ? "屍王" : "首領";
+      this.waveName = this.theater === "night" ? "屍王" : "旗艦";
       this.banner = this.theater === "night" ? "屍王進場" : "首領進場";
     } else {
       const plan = this.formationPlan();
@@ -709,6 +710,7 @@ export class Game {
       hold,
       mark: Boolean(craft.mark),
       guard: Math.PI / 2,
+      wind: 0,
     };
     this.enemies.push(enemy);
   }
@@ -731,10 +733,10 @@ export class Game {
       vy: 0,
       hp: maxHp,
       maxHp,
-      r: 46,
+      r: this.theater === "night" ? 58 : 52,
       t: 0,
       phase: 0,
-      cool: 1.2,
+      cool: 1.4,
       flash: 0,
       locked: false,
       quiz,
@@ -744,6 +746,7 @@ export class Game {
       hold: 0,
       mark: false,
       guard: 0,
+      wind: 0,
     });
     this.banner = `${this.bossTitle(quiz)} · 血線鎖盾`;
     this.bannerT = 1.8;
@@ -758,9 +761,21 @@ export class Game {
         e.y += 86 * dt;
         if (e.y >= 112) e.entered = true;
       } else {
+        const night = this.theater === "night";
+        if (e.wind !== 0) {
+          this.tickLunge(e, dt);
+          return;
+        }
         const ord = Math.max(1, this.wave / 3);
-        e.x = this.w / 2 + Math.sin(e.t * (0.65 + ord * 0.04)) * this.w * 0.28;
-        e.y = 116 + Math.sin(e.t * 1.15) * 20;
+        if (night) {
+          const side = Math.sin(e.t * 0.5) > 0 ? 1 : -1;
+          const dest = this.w / 2 + side * this.w * 0.22;
+          e.x += (dest - e.x) * Math.min(1, dt * 1.5);
+          e.y = 176 + Math.sin(e.t * 2.4) * 5;
+        } else {
+          e.x = this.w / 2 + Math.sin(e.t * (0.55 + ord * 0.03)) * this.w * 0.3;
+          e.y = 108 + Math.sin(e.t * 0.9) * 12;
+        }
         e.cool -= dt;
         if (e.locked || e.cool > 0) return;
         this.bossVolley(e);
@@ -903,24 +918,87 @@ export class Game {
     return Math.abs(d) < 1.05;
   }
 
+  private tickLunge(e: Enemy, dt: number) {
+    if (e.wind > 0) {
+      e.wind -= dt;
+      e.y += 340 * dt;
+      e.x += (this.player.x - e.x) * Math.min(1, dt * 2.2);
+      if (e.wind <= 0) e.wind = -0.55;
+      return;
+    }
+    e.wind += dt;
+    e.y += (176 - e.y) * Math.min(1, dt * 3);
+    if (e.wind >= 0) {
+      e.wind = 0;
+      e.cool = 1.15;
+    }
+  }
+
+  private cast(
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    look: Bullet["look"],
+    r: number,
+    ay = 0,
+  ) {
+    if (this.bullets.length > 120) return;
+    this.bullets.push({
+      x,
+      y,
+      vx,
+      vy,
+      ay,
+      r,
+      friendly: false,
+      life: 4.4,
+      dmg: 1,
+      look,
+    });
+  }
+
   private bossVolley(e: Enemy) {
     const ord = Math.max(1, this.wave / 3);
+    const night = this.theater === "night";
+    if (night && e.phase === 1) {
+      e.wind = 0.42;
+      e.cool = 2;
+      for (let i = -2; i <= 2; i++) {
+        const ang = Math.PI / 2 + i * 0.32;
+        this.cast(e.x, e.y + e.r * 0.4, Math.cos(ang) * 160, Math.sin(ang) * 150, "blob", 7, 160);
+      }
+      return;
+    }
     if (e.phase <= 0) {
-      e.cool = Math.max(0.55, 1.15 - ord * 0.05);
-      if (this.theater === "night") this.launchAt(e.x, e.y, 250 + ord * 12, 90, 0.09, 3, 4.4);
+      e.cool = night ? 1.2 : 1.05;
+      if (night) this.launchAt(e.x, e.y + 10, 230 + ord * 8, 120, 0.16, 5, 5.2);
       else {
-        this.shootFan(e.x, e.y + e.r * 0.4, 3, 0.42, 200 + ord * 12);
-        if (ord >= 2) this.shootAim(e.x, e.y, 230);
+        for (const s of [-1, 1]) {
+          const ang = Math.PI / 2 + s * 0.42;
+          this.cast(e.x + s * e.r * 1.3, e.y + 8, Math.cos(ang) * 230, Math.sin(ang) * 230, "shard", 4.2);
+        }
+        this.cast(e.x, e.y + e.r * 0.4, 0, 250, "shard", 4.2);
       }
       return;
     }
     if (e.phase === 1) {
-      e.cool = 0.58;
-      this.launchAt(e.x, e.y, 300 + ord * 8, this.theater === "night" ? 40 : 0, 0.1, 3, 4);
+      e.cool = 1.45;
+      for (let i = 0; i < 7; i++) this.cast(e.x, e.y + e.r * 0.2 + i * 6, 0, 520, "beam", 5.5);
       return;
     }
-    e.cool = 0.82;
-    this.launchAt(e.x, e.y, 240 + ord * 8, this.theater === "night" ? 70 : 0, 0.16, 5, 4.2);
+    if (night) {
+      e.cool = 1.05;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + e.t;
+        this.cast(e.x, e.y, Math.cos(a) * 70, Math.sin(a) * 40 + 30, "blob", 6, 90);
+      }
+      return;
+    }
+    e.cool = 0.38;
+    e.guard += 0.62;
+    this.cast(e.x, e.y, Math.cos(e.guard) * 210, Math.sin(e.guard) * 210, "shard", 4);
+    this.cast(e.x, e.y, Math.cos(e.guard + Math.PI) * 210, Math.sin(e.guard + Math.PI) * 210, "shard", 4);
   }
 
   private summonRing() {
@@ -1774,6 +1852,10 @@ export class Game {
   }
 
   private drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy) {
+    if (e.kind === "boss") {
+      this.drawBoss(ctx, e);
+      return;
+    }
     const spec = this.enemyArt(e);
     const frame = Math.floor((this.time + e.seed) * (e.kind === "dart" ? 10 : 7)) % 4;
     ctx.save();
@@ -1782,51 +1864,12 @@ export class Game {
     const painted = this.art.draw(ctx, spec.id, frame, 0, 0, spec.size);
     ctx.filter = "none";
     this.drawTell(ctx, e);
-    if (painted) {
-      if (e.kind === "boss" && (e.locked || this.question)) {
-        ctx.globalAlpha = 0.45 + Math.sin(this.time * 7) * 0.25;
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = PAL.fg;
-        ctx.beginPath();
-        ctx.arc(0, 0, e.r + 16, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-      return;
-    }
     ctx.restore();
+    if (painted) return;
     ctx.save();
     ctx.translate(e.x, e.y);
-    const color = e.kind === "boss" ? (e.quiz === "word" ? PAL.cyan : PAL.amber) : PAL.rose;
-    if (e.kind === "boss") {
-      ctx.rotate(Math.sin(e.t * 0.45) * 0.06);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, e.r + 8, e.t * 0.8, e.t * 0.8 + Math.PI * 1.35);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, -e.r);
-      ctx.lineTo(e.r * 0.82, 0);
-      ctx.lineTo(0, e.r * 0.9);
-      ctx.lineTo(-e.r * 0.82, 0);
-      ctx.closePath();
-      ctx.fillStyle = e.flash > 0 ? "#ffffff" : "#10161c";
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(0, 0, 8, 0, Math.PI * 2);
-      ctx.fill();
-      if (e.locked || this.question) {
-        ctx.globalAlpha = 0.45 + Math.sin(this.time * 7) * 0.25;
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = PAL.fg;
-        ctx.beginPath();
-        ctx.arc(0, 0, e.r + 16, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    } else if (e.kind === "tank") {
+    const color = PAL.rose;
+    if (e.kind === "tank") {
       ctx.rotate(e.t * 0.4);
       ctx.beginPath();
       for (let i = 0; i < 6; i++) {
@@ -1856,6 +1899,173 @@ export class Game {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  private drawBoss(ctx: CanvasRenderingContext2D, e: Enemy) {
+    const night = this.theater === "night";
+    const lock = e.locked || !!this.question;
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    if (e.flash > 0) ctx.filter = "brightness(1.7)";
+    if (night) this.drawKing(ctx, e);
+    else this.drawFlagship(ctx, e);
+    ctx.filter = "none";
+    if (lock) {
+      ctx.globalAlpha = 0.55 + Math.sin(this.time * 7) * 0.2;
+      ctx.strokeStyle = night ? "#d6ff9a" : PAL.fg;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (night) {
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + this.time;
+          const x = Math.cos(a) * (e.r + 18);
+          const y = Math.sin(a) * (e.r + 14);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      } else ctx.arc(0, 0, e.r + 22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = night ? "#d6ff9a" : PAL.cyan;
+    ctx.font = `600 14px ${FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText(night ? "屍王" : "旗艦", 0, e.r + 28);
+    ctx.restore();
+  }
+
+  private drawFlagship(ctx: CanvasRenderingContext2D, e: Enemy) {
+    const wing = e.r * 2.35;
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, e.r * 0.7, wing * 0.7, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0c1824";
+    ctx.strokeStyle = "#7ef6ff";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(0, -e.r * 0.95);
+    ctx.lineTo(wing, e.r * 0.08);
+    ctx.lineTo(wing * 0.62, e.r * 0.5);
+    ctx.lineTo(0, e.r * 0.12);
+    ctx.lineTo(-wing * 0.62, e.r * 0.5);
+    ctx.lineTo(-wing, e.r * 0.08);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "#1a4a55";
+    ctx.beginPath();
+    ctx.moveTo(0, -e.r * 0.55);
+    ctx.lineTo(wing * 0.45, e.r * 0.05);
+    ctx.lineTo(0, e.r * 0.02);
+    ctx.lineTo(-wing * 0.45, e.r * 0.05);
+    ctx.closePath();
+    ctx.stroke();
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = "#071018";
+      ctx.fillRect(s * wing * 0.58 - 9, e.r * 0.12, 18, 20);
+      const flick = 0.55 + Math.sin(this.time * 28 + s) * 0.45;
+      ctx.fillStyle = `rgba(126,246,255,${0.35 + flick * 0.65})`;
+      ctx.beginPath();
+      ctx.moveTo(s * wing * 0.58 - 6, e.r * 0.32);
+      ctx.lineTo(s * wing * 0.58, e.r * 0.32 + 18 * flick);
+      ctx.lineTo(s * wing * 0.58 + 6, e.r * 0.32);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#e9fff8";
+    ctx.beginPath();
+    ctx.ellipse(0, -e.r * 0.18, 7, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = PAL.cyan;
+    ctx.beginPath();
+    ctx.ellipse(0, -e.r * 0.22, 3, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = PAL.cyan;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, e.r + 8, e.t * 1.5, e.t * 1.5 + Math.PI * 1.15);
+    ctx.stroke();
+    for (let i = 0; i < 2; i++) {
+      const a = e.t * 1.5 + i * Math.PI;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * (e.r + 8), Math.sin(a) * (e.r + 8), 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (e.phase === 1 && !e.locked && !this.question && e.cool < 0.55 && e.cool > 0) {
+      ctx.globalAlpha = 0.25 + (0.55 - e.cool) * 0.9;
+      ctx.fillStyle = "#ff4d6d";
+      ctx.fillRect(-7, e.r * 0.2, 14, this.h);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  private drawKing(ctx: CanvasRenderingContext2D, e: Enemy) {
+    const lean = e.wind > 0 ? 0.22 : 0;
+    ctx.rotate(lean);
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath();
+    ctx.ellipse(0, e.r * 0.95, e.r * 0.9, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const swing = Math.sin(e.t * 2.4) * 0.45;
+    for (const s of [-1, 1]) {
+      ctx.save();
+      ctx.translate(s * e.r * 0.62, -e.r * 0.05);
+      ctx.rotate(s * (0.9 + swing));
+      ctx.fillStyle = "#12180e";
+      ctx.strokeStyle = "#9be06a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(s * 6, e.r);
+      ctx.lineTo(s * 24, e.r * 1.15);
+      ctx.lineTo(s * 8, e.r * 0.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = e.flash > 0 ? "#f4ffe4" : "#141c10";
+    ctx.strokeStyle = "#b6f56a";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -e.r * 1.05);
+    ctx.quadraticCurveTo(e.r * 1.05, -e.r * 0.2, e.r * 0.72, e.r * 0.9);
+    ctx.lineTo(-e.r * 0.72, e.r * 0.9);
+    ctx.quadraticCurveTo(-e.r * 1.05, -e.r * 0.2, 0, -e.r * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#243018";
+    ctx.beginPath();
+    ctx.arc(0, -e.r * 0.62, e.r * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#eaff9a";
+    ctx.fillRect(-12, -e.r * 0.7, 7, 3);
+    ctx.fillRect(5, -e.r * 0.7, 7, 3);
+    ctx.strokeStyle = "#6d8f38";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, -e.r * 0.48, 11, 0.15, Math.PI - 0.15);
+    ctx.stroke();
+    const pulse = 6 + Math.sin(this.time * 6) * 1.6;
+    ctx.fillStyle = "rgba(190,255,90,0.9)";
+    ctx.beginPath();
+    ctx.arc(0, e.r * 0.18, pulse, 0, Math.PI * 2);
+    ctx.fill();
+    if (e.wind > 0) {
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = "#d6ff9a";
+      ctx.beginPath();
+      ctx.moveTo(-e.r, -e.r);
+      ctx.lineTo(-e.r - 18, -e.r - 28);
+      ctx.moveTo(e.r, -e.r);
+      ctx.lineTo(e.r + 18, -e.r - 28);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
   private drawTell(ctx: CanvasRenderingContext2D, e: Enemy) {
