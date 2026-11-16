@@ -234,6 +234,7 @@ declare global {
       waveName: () => string;
       phase: () => number;
       foes: () => string;
+      pokeAsk: () => string;
     };
   }
 }
@@ -1567,8 +1568,11 @@ export class Game {
 
   private damageEnemy(e: Enemy, dmg: number, pierce = false, x = this.player.x, y = this.player.y) {
     if (!e.alive) return;
-    if (e.kind === "boss" && e.locked) {
-      this.burst(e.x, e.y - e.r, PAL.fg, 4);
+    if (e.locked) {
+      if (e.flash <= 0) {
+        e.flash = 0.1;
+        this.burst(e.x, e.y - e.r, PAL.fg, 3);
+      }
       return;
     }
     if (e.mark && !pierce && !this.gapOpen(e, x, y)) {
@@ -1623,6 +1627,7 @@ export class Game {
     };
     this.pointerOn = false;
     this.gateAt = this.time;
+    this.inputLock = 0.45;
     this.sfx.shield();
     this.emit();
   }
@@ -2761,6 +2766,43 @@ export class Game {
           .filter((e) => e.alive)
           .map((e) => `${e.mark ? "M" : ""}${e.kind}:${Math.round(e.x)},${Math.round(e.y)}`)
           .join(" "),
+      pokeAsk: () => {
+        if (this.status !== "play") this.start();
+        this.enemies = [];
+        this.bullets = [];
+        this.question = null;
+        this.built = null;
+        const foe: Enemy = {
+          kind: "grunt",
+          x: this.w / 2,
+          y: 120,
+          vx: 0,
+          vy: 0,
+          hp: 6,
+          maxHp: 6,
+          r: 16,
+          t: 0,
+          phase: 0,
+          cool: 9,
+          flash: 0,
+          locked: false,
+          quiz: "quick",
+          seed: 1,
+          alive: true,
+          entered: true,
+          hold: 0,
+          mark: false,
+          guard: 0,
+          wind: 0,
+          ask: true,
+        };
+        this.enemies.push(foe);
+        this.damageEnemy(foe, 5);
+        this.damageEnemy(foe, 5);
+        this.damageEnemy(foe, 5);
+        const asked = this.question as PublicQuestion | null;
+        return `${asked?.prompt ?? "none"} alive=${foe.alive} hp=${foe.hp} locked=${foe.locked}`;
+      },
     };
   }
 }
