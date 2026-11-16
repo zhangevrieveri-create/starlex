@@ -72,7 +72,63 @@ export type BuiltQuestion = {
   hint: string;
   choices: string[];
   answer: number;
+  letter?: string;
 };
+
+type Letter = { letter: string; say: string; hear: string[] };
+
+export const LETTERS: Letter[] = [
+  { letter: "A", say: "ei", hear: ["a", "ay", "ei", "hey"] },
+  { letter: "B", say: "bi", hear: ["b", "be", "bee", "bi"] },
+  { letter: "C", say: "si", hear: ["c", "see", "sea", "si"] },
+  { letter: "D", say: "di", hear: ["d", "dee", "di"] },
+  { letter: "E", say: "yi", hear: ["e", "ee", "yi"] },
+  { letter: "F", say: "ef", hear: ["f", "ef", "eff"] },
+  { letter: "G", say: "ji", hear: ["g", "gee", "jee", "ji"] },
+  { letter: "H", say: "eich", hear: ["h", "aitch", "eich"] },
+  { letter: "I", say: "ai", hear: ["i", "eye", "ai"] },
+  { letter: "J", say: "jei", hear: ["j", "jay", "jei"] },
+  { letter: "K", say: "kei", hear: ["k", "kay", "kei"] },
+  { letter: "L", say: "el", hear: ["l", "el", "ell"] },
+  { letter: "M", say: "em", hear: ["m", "em"] },
+  { letter: "N", say: "en", hear: ["n", "en"] },
+  { letter: "O", say: "ou", hear: ["o", "oh", "ou"] },
+  { letter: "P", say: "pi", hear: ["p", "pee", "pi"] },
+  { letter: "Q", say: "kiu", hear: ["q", "cue", "queue", "kiu", "kyu"] },
+  { letter: "R", say: "ar", hear: ["r", "are", "ar"] },
+  { letter: "S", say: "es", hear: ["s", "es", "ess"] },
+  { letter: "T", say: "ti", hear: ["t", "tee", "ti"] },
+  { letter: "U", say: "you", hear: ["u", "you", "yu"] },
+  { letter: "V", say: "vi", hear: ["v", "vee", "vi"] },
+  { letter: "W", say: "dabliu", hear: ["w", "double u", "doubleyou", "dabliu"] },
+  { letter: "X", say: "eks", hear: ["x", "ex", "eks"] },
+  { letter: "Y", say: "wai", hear: ["y", "why", "wai"] },
+  { letter: "Z", say: "zi", hear: ["z", "zee", "zi", "zed"] },
+];
+
+export function letterHeard(letter: string, transcript: string): boolean {
+  const row = LETTERS.find((item) => item.letter === letter.toUpperCase());
+  if (!row) return false;
+  const raw = transcript.toLowerCase().trim();
+  const compact = raw.replace(/[^a-z]/g, "");
+  if (compact === row.letter.toLowerCase()) return true;
+  return row.hear.some((alias) => {
+    const text = alias.toLowerCase();
+    if (text.includes(" ")) return raw.includes(text);
+    return compact === text.replace(/[^a-z]/g, "");
+  });
+}
+
+export function makeQuestion(
+  kind: QuizKind,
+  words: Word[],
+  rng: () => number = Math.random,
+  known = "",
+): BuiltQuestion {
+  if (kind === "math") return makeMath(rng);
+  if (kind === "quick") return makeQuick(words, rng, known);
+  return makeWord(words, rng, known);
+}
 
 function shuffle<T>(list: T[], rng: () => number): T[] {
   const arr = list.slice();
@@ -85,13 +141,32 @@ function shuffle<T>(list: T[], rng: () => number): T[] {
   return arr;
 }
 
-export function makeQuestion(kind: QuizKind, words: Word[], rng: () => number = Math.random): BuiltQuestion {
-  if (kind === "math") return makeMath(rng);
-  if (kind === "quick") return makeQuick(words, rng);
-  return makeWord(words, rng);
+function makeLetter(rng: () => number, known: string, kind: QuizKind): BuiltQuestion {
+  const fresh = LETTERS.filter((item) => !known.includes(item.letter));
+  const pool = fresh.length > 0 ? fresh : LETTERS;
+  const correct = pool[Math.floor(rng() * pool.length)] ?? LETTERS[0]!;
+  const wrongs: string[] = [];
+  const rest = shuffle(
+    LETTERS.filter((item) => item.say !== correct.say),
+    rng,
+  );
+  for (const item of rest) {
+    if (!wrongs.includes(item.say)) wrongs.push(item.say);
+    if (wrongs.length >= 3) break;
+  }
+  const choices = shuffle([correct.say, ...wrongs], rng);
+  return {
+    kind,
+    prompt: correct.letter,
+    hint: fresh.length > 0 ? "大声读出这个字母，或选出正确读音" : "26 个都会了，复习读音",
+    choices,
+    answer: Math.max(0, choices.indexOf(correct.say)),
+    letter: correct.letter,
+  };
 }
 
-function makeWord(words: Word[], rng: () => number): BuiltQuestion {
+function makeWord(words: Word[], rng: () => number, known: string): BuiltQuestion {
+  if (known.length < LETTERS.length) return makeLetter(rng, known, "word");
   const custom = words.filter((w) => w.term.trim() && w.meaning.trim());
   const source = custom.length > 0 ? custom : DEFAULT_WORDS;
   const correct = source[Math.floor(rng() * source.length)] ?? DEFAULT_WORDS[0]!;
@@ -124,49 +199,48 @@ function makeWord(words: Word[], rng: () => number): BuiltQuestion {
 }
 
 function makeMath(rng: () => number): BuiltQuestion {
-  if (rng() < 0.3) {
-    const a = 2 + Math.floor(rng() * 8);
-    const b = 2 + Math.floor(rng() * 8);
-    return numberQuestion(`${a} × ${b}`, a * b, "乘法表，選出得數", rng);
+  if (rng() < 0.25) {
+    const pairs: [number, number][] = [];
+    for (let a = 2; a <= 10; a++) {
+      for (let b = 2; b <= 10; b++) if (a * b <= 20) pairs.push([a, b]);
+    }
+    const pair = pairs[Math.floor(rng() * pairs.length)] ?? [2, 2];
+    return numberQuestion(`${pair[0]} × ${pair[1]}`, pair[0] * pair[1], "20 以內，選出得數", rng, 20, "math");
   }
-  const add = rng() < 0.55;
-  let a = 0;
-  let b = 0;
-  let ans = 0;
-  let prompt = "";
-  if (add) {
-    a = Math.floor(rng() * 91);
-    b = 1 + Math.floor(rng() * (100 - a));
-    ans = a + b;
-    prompt = `${a} + ${b}`;
-  } else {
-    a = 1 + Math.floor(rng() * 100);
-    b = Math.floor(rng() * (a + 1));
-    ans = a - b;
-    prompt = `${a} − ${b}`;
-  }
-  return numberQuestion(prompt, ans, "100 以內，選出得數", rng);
+  const sum = addSub(20, rng);
+  return numberQuestion(sum.prompt, sum.ans, "20 以內，選出得數", rng, 20, "math");
 }
 
-function makeQuick(words: Word[], rng: () => number): BuiltQuestion {
-  const roll = rng();
-  if (roll < 0.4) {
-    const add = rng() < 0.6;
-    const a = Math.floor(rng() * 21);
-    const b = add ? Math.floor(rng() * (21 - a)) : Math.floor(rng() * (a + 1));
-    const ans = add ? a + b : a - b;
-    return numberQuestion(`${a} ${add ? "+" : "−"} ${b}`, ans, "20 以內，選出得數", rng, 20);
+function addSub(cap: number, rng: () => number) {
+  const add = rng() < 0.6;
+  if (add) {
+    const a = 1 + Math.floor(rng() * (cap - 1));
+    const b = 1 + Math.floor(rng() * (cap - a));
+    return { prompt: `${a} + ${b}`, ans: a + b };
   }
-  if (roll < 0.65) return makeCompare(rng);
-  if (roll < 0.85) return makeNext(rng);
-  const word = makeWord(words, rng);
+  const a = 1 + Math.floor(rng() * cap);
+  const b = 1 + Math.floor(rng() * a);
+  return { prompt: `${a} − ${b}`, ans: a - b };
+}
+
+function makeQuick(words: Word[], rng: () => number, known: string): BuiltQuestion {
+  const roll = rng();
+  if (roll < 0.62) {
+    const sum = addSub(10, rng);
+    return numberQuestion(sum.prompt, sum.ans, "10 以內，選出得數", rng, 10, "quick");
+  }
+  if (roll < 0.78) return makeCompare(rng, 10);
+  if (roll < 0.9) return makeNext(rng, 10);
+  const word = makeWord(words, rng, known);
   return { ...word, kind: "quick" };
 }
 
-function makeCompare(rng: () => number): BuiltQuestion {
+function makeCompare(rng: () => number, cap: number): BuiltQuestion {
   const same = rng() < 0.22;
-  const a = Math.floor(rng() * 31);
-  const b = same ? a : Math.floor(rng() * 31);
+  const a = Math.floor(rng() * (cap + 1));
+  let b = Math.floor(rng() * (cap + 1));
+  if (same) b = a;
+  else if (b === a) b = (a + 1) % (cap + 1);
   const ans = a === b ? "相等" : a > b ? "大於" : "小於";
   const choices = shuffle(["大於", "小於", "相等", "差不多"], rng);
   return {
@@ -178,12 +252,14 @@ function makeCompare(rng: () => number): BuiltQuestion {
   };
 }
 
-function makeNext(rng: () => number): BuiltQuestion {
-  const step = [1, 2, 3, 5, 10][Math.floor(rng() * 5)] ?? 2;
-  const start = Math.floor(rng() * 8);
+function makeNext(rng: () => number, cap: number): BuiltQuestion {
+  const steps = [1, 2, 3].filter((step) => step * 3 <= cap);
+  const step = steps[Math.floor(rng() * steps.length)] ?? 1;
+  const room = Math.max(0, cap - step * 3);
+  const start = Math.floor(rng() * (room + 1));
   const seq = [start, start + step, start + step * 2];
   const ans = start + step * 3;
-  return numberQuestion(`${seq.join("，")}，？`, ans, "找出下一個數", rng, 40);
+  return numberQuestion(`${seq.join("，")}，？`, ans, "找出下一個數", rng, cap, "quick");
 }
 
 function numberQuestion(
@@ -191,10 +267,11 @@ function numberQuestion(
   ans: number,
   hint: string,
   rng: () => number,
-  cap = 100,
+  cap: number,
+  kind: QuizKind,
 ): BuiltQuestion {
   const wrongs = new Set<number>();
-  const deltas = [1, -1, 2, -2, 10, -10, 5, -5, 3, -3, 9, -9, 4];
+  const deltas = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5];
   for (const d of deltas) {
     const v = ans + d;
     if (v >= 0 && v <= cap && v !== ans) wrongs.add(v);
@@ -207,7 +284,7 @@ function numberQuestion(
   }
   const ordered = shuffle([String(ans), ...[...wrongs].slice(0, 3).map(String)], rng);
   return {
-    kind: prompt.includes("×") || hint.includes("100") ? "math" : "quick",
+    kind,
     prompt,
     hint,
     choices: ordered,

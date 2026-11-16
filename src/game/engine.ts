@@ -1,5 +1,5 @@
 import { Sfx } from "@/game/audio";
-import { bossName, DEFAULT_WORDS, makeQuestion, type BuiltQuestion } from "@/game/lexicon";
+import { bossName, DEFAULT_WORDS, letterHeard, makeQuestion, type BuiltQuestion } from "@/game/lexicon";
 import { SpriteBook, type SheetId } from "@/game/sprites";
 import type { ChallengeMode, PublicQuestion, QuizKind, RunMode, Snap, Theater, TrophyId, Word } from "@/game/types";
 
@@ -311,7 +311,9 @@ export class Game {
   private redOffered = false;
   private redTaken = false;
   private runPoints = 0;
+  private letters = "";
   onProgress: ((e: { id?: TrophyId; name?: string; points: number }) => void) | null = null;
+  onLetter: ((letters: string) => void) | null = null;
   private queue: Craft[] = [];
   private shake = 0;
   private hurtFlash = 0;
@@ -370,6 +372,22 @@ export class Game {
 
   setOwned(ids: TrophyId[]) {
     this.owned = new Set(ids);
+  }
+
+  setLetters(letters: string) {
+    this.letters = letters;
+  }
+
+  hear(text: string) {
+    const letter = this.built?.letter;
+    if (!letter || !this.question || this.paused || this.inputLock > 0 || this.status !== "play") return;
+    if (!letterHeard(letter, text)) {
+      this.banner = "没听清，再读一次，或选读音";
+      this.bannerT = 1.2;
+      this.emit();
+      return;
+    }
+    this.solveGate();
   }
 
   setTheater(theater: Theater) {
@@ -1611,7 +1629,7 @@ export class Game {
   }
 
   private openGate(e: Enemy) {
-    const built = makeQuestion(e.quiz, this.words);
+    const built = makeQuestion(e.quiz, this.words, Math.random, this.letters);
     const boss = e.kind === "boss";
     this.gate = e;
     this.built = built;
@@ -1624,6 +1642,7 @@ export class Game {
       phases: boss ? PHASES.length : 1,
       bossName: boss ? this.bossTitle(e.quiz) : "題標",
       wrong: false,
+      letter: built.letter ?? null,
     };
     this.pointerOn = false;
     this.gateAt = this.time;
@@ -1636,7 +1655,7 @@ export class Game {
     const foe = this.gate ?? this.liveBoss();
     const kind = foe?.quiz ?? this.built?.kind ?? "word";
     const boss = foe?.kind === "boss";
-    const built = makeQuestion(kind, this.words);
+    const built = makeQuestion(kind, this.words, Math.random, this.letters);
     this.built = built;
     this.question = {
       kind: built.kind,
@@ -1647,6 +1666,7 @@ export class Game {
       phases: boss ? PHASES.length : 1,
       bossName: boss ? this.bossTitle(kind) : "題標",
       wrong: true,
+      letter: built.letter ?? null,
     };
     this.gateAt = this.time;
     this.shake = this.reduce ? 0 : 0.7;
@@ -1655,6 +1675,7 @@ export class Game {
   }
 
   private solveGate() {
+    const learned = this.built?.letter;
     this.solved += 1;
     this.bank(12);
     if (this.solved >= 8) this.grant("scholar", "學霸", 80);
@@ -1663,6 +1684,10 @@ export class Game {
     this.built = null;
     this.question = null;
     this.gate = null;
+    if (learned && !this.letters.includes(learned)) {
+      this.letters += learned;
+      this.onLetter?.(this.letters);
+    }
     this.score += foe?.kind === "boss" ? 480 : 220;
     if (foe && foe.kind !== "boss") {
       foe.locked = false;

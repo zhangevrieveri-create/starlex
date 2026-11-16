@@ -42,6 +42,7 @@ export type Save = {
   muted: boolean;
   points: number;
   trophies: TrophyId[];
+  letters: string;
 };
 
 export type PublicQuestion = {
@@ -53,6 +54,7 @@ export type PublicQuestion = {
   phases: number;
   bossName: string;
   wrong: boolean;
+  letter: string | null;
 };
 
 export type Snap = {

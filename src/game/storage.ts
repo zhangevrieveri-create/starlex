@@ -14,11 +14,21 @@ export function freshSave(): Save {
     muted: false,
     points: 0,
     trophies: [],
+    letters: "",
   };
 }
 
 function asRun(v: unknown): RunMode {
   return v === "endless" ? "endless" : "campaign";
+}
+
+function asLetters(v: unknown): string {
+  if (typeof v !== "string") return "";
+  const out: string[] = [];
+  for (const ch of v.toUpperCase()) {
+    if (ch >= "A" && ch <= "Z" && !out.includes(ch)) out.push(ch);
+  }
+  return out.join("");
 }
 
 function asTrophies(v: unknown): TrophyId[] {
@@ -93,6 +103,7 @@ export function loadSave(): Save {
       muted: Boolean(parsed.muted),
       points: Math.max(0, Math.floor(Number(parsed.points) || 0)),
       trophies: asTrophies(parsed.trophies),
+      letters: asLetters(parsed.letters),
     };
   } catch {
     return freshSave();

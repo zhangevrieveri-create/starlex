@@ -28,16 +28,26 @@ const THEATERS: { id: Theater; label: string; copy: string }[] = [
   { id: "night", label: "喪屍夜", copy: "屍群會停在遠處瞄準你。普通屍吐一口，跑尸連射，壯屍撒酸。答對才能打屍王。" },
 ];
 
+type SpeechRec = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+};
+
 const RUNS: { id: RunMode; label: string; copy: string }[] = [
   { id: "campaign", label: "闖關", copy: "8 關是設計好的。光門會在中間停一下。第 4、6、8 關打首領，打完就結束。" },
   { id: "endless", label: "無限", copy: "沒有結尾。每 3 陣一個首領，血量和攻勢會一直往上加。" },
 ];
 
 const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
-  { id: "mix", label: "混合", copy: "首領輪流考單詞和百以內加減（含乘法）。每一波另有兩隻題標，半血出簡單題。" },
-  { id: "words", label: "單詞", copy: "首領都從詞庫抽。題標仍是 20 以內、比大小，或一道簡單詞。" },
-  { id: "math", label: "數學", copy: "首領考百以內加減，大約三成是乘法表。小怪題更短。" },
-  { id: "drill", label: "速答", copy: "每一波三隻題標。20 以內、比大小、找規律、簡單詞。首領仍是混合題。" },
+  { id: "mix", label: "混合", copy: "首領輪流考字母讀音和 20 以內計算。小怪是 10 以內，或一個字母。" },
+  { id: "words", label: "單詞", copy: "先把 26 個字母的讀音讀會。可以大聲讀，也可以選。都會了才進詞庫。" },
+  { id: "math", label: "數學", copy: "小怪是 10 以內加減。首領是 20 以內，偶爾有得數不超過 20 的乘法。" },
+  { id: "drill", label: "速答", copy: "每一波三隻題標，10 以內或字母讀音。首領仍是混合題。" },
 ];
 
 export function StarAssault() {
@@ -54,6 +64,7 @@ export function StarAssault() {
   const [meaning, setMeaning] = useState("");
   const [dump, setDump] = useState("");
   const [lexErr, setLexErr] = useState("");
+  const [hearing, setHearing] = useState("");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,12 +79,20 @@ export function StarAssault() {
     game.setMode(loaded.mode);
     game.setRun(loaded.run);
     game.setOwned(loaded.trophies);
+    game.setLetters(loaded.letters);
     game.setTheater(loaded.theater);
     game.setMuted(loaded.muted);
     game.onProgress = (evt) => {
       setSave((prev) => {
         const trophies = evt.id && !prev.trophies.includes(evt.id) ? [...prev.trophies, evt.id] : prev.trophies;
         const next = { ...prev, points: prev.points + evt.points, trophies };
+        writeSave(next);
+        return next;
+      });
+    };
+    game.onLetter = (letters) => {
+      setSave((prev) => {
+        const next = { ...prev, letters };
         writeSave(next);
         return next;
       });
@@ -146,6 +165,8 @@ export function StarAssault() {
     gameRef.current?.setWords(next.words);
     gameRef.current?.setMode(next.mode);
     gameRef.current?.setRun(next.run);
+    gameRef.current?.setOwned(next.trophies);
+    gameRef.current?.setLetters(next.letters);
     gameRef.current?.setTheater(next.theater);
     gameRef.current?.setMuted(next.muted);
   }
@@ -157,6 +178,7 @@ export function StarAssault() {
     game.setMode(save.mode);
     game.setRun(save.run);
     game.setOwned(save.trophies);
+    game.setLetters(save.letters);
     game.setTheater(save.theater);
     game.setMuted(save.muted);
     game.start();
@@ -183,6 +205,42 @@ export function StarAssault() {
     if (!canvas || !game) return;
     const rect = canvas.getBoundingClientRect();
     game.setPointer(e.clientX - rect.left, e.clientY - rect.top, on);
+  }
+
+  function listen(letter: string | null) {
+    if (!letter) return;
+    const host = window as unknown as {
+      SpeechRecognition?: new () => SpeechRec;
+      webkitSpeechRecognition?: new () => SpeechRec;
+    };
+    const Ctor = host.SpeechRecognition ?? host.webkitSpeechRecognition;
+    if (!Ctor) {
+      setHearing("这台装置听不了，请选读音");
+      window.setTimeout(() => setHearing(""), 1800);
+      return;
+    }
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 5;
+    setHearing("正在听…");
+    rec.onresult = (ev) => {
+      const bits: string[] = [];
+      const row = ev.results[0];
+      if (row) for (let i = 0; i < row.length; i++) bits.push(row[i]?.transcript ?? "");
+      gameRef.current?.hear(bits.join(" "));
+      setHearing("");
+    };
+    rec.onerror = () => {
+      setHearing("没听清，再读一次");
+      window.setTimeout(() => setHearing(""), 1400);
+    };
+    rec.onend = () => setHearing((cur) => (cur === "正在听…" ? "" : cur));
+    try {
+      rec.start();
+    } catch {
+      setHearing("这台装置听不了，请选读音");
+    }
   }
 
   const mode = MODES.find((m) => m.id === save.mode) ?? MODES[0]!;
@@ -235,7 +293,9 @@ export function StarAssault() {
               <p className="mt-3 text-base leading-relaxed text-muted">
                 光門會在畫面中間停住，看清再選。闖關一共 8 關。無限沒有結尾，越後面越硬。
               </p>
-              <p className="mt-3 text-sm text-accent">積分 {formatScore(save.points)} · 獎杯 {save.trophies.length}/{TROPHIES.length}</p>
+              <p className="mt-3 text-sm text-accent">
+                積分 {formatScore(save.points)} · 獎杯 {save.trophies.length}/{TROPHIES.length} · 字母 {save.letters.length}/26
+              </p>
               {best && (
                 <p className="mt-4 text-sm text-accent">
                   本機最高 {formatScore(best.score)} · {best.name}
@@ -453,15 +513,29 @@ export function StarAssault() {
             className="pointer-events-auto w-full max-w-md rounded-2xl border border-border bg-surface/95 p-4"
           >
             <p className="font-display text-sm text-accent">
-              {question.kind === "word" ? "單詞鎖" : question.kind === "quick" ? "小題" : "算式鎖"} · {question.bossName} · 第 {question.phase}/
-              {question.phases} 道
+              {question.letter ? "字母讀音" : question.kind === "word" ? "單詞鎖" : question.kind === "quick" ? "小題" : "算式鎖"} ·{" "}
+              {question.bossName} · 第 {question.phase}/{question.phases} 道
             </p>
-            <h2 id="quiz-prompt" className="mt-2 break-words text-center font-display text-3xl font-bold text-fg">
+            <h2
+              id="quiz-prompt"
+              className={
+                question.letter
+                  ? "mt-2 text-center font-display text-7xl font-bold text-fg"
+                  : "mt-2 break-words text-center font-display text-3xl font-bold text-fg"
+              }
+            >
               {question.prompt}
             </h2>
-            <p className="mt-1 text-center text-sm text-muted">
-              {question.kind === "quick" ? "答對，這隻題標才倒下。答錯就換一題。" : "場面還在慢速走。答得快，解開時多扣一截。"}
-            </p>
+            <p className="mt-1 text-center text-sm text-muted">{question.hint}</p>
+            {question.letter && (
+              <button
+                type="button"
+                className="mt-3 min-h-11 w-full rounded-xl bg-primary px-4 font-display text-base font-semibold text-bg"
+                onClick={() => listen(question.letter)}
+              >
+                {hearing || "大声读"}
+              </button>
+            )}
             {question.wrong && <p className="mt-1 text-center text-sm text-danger">這題換新的。答對才繼續扣血。</p>}
             <div className="mt-3 grid gap-2">
               {question.choices.map((choice, index) => (
