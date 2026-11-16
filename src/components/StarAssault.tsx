@@ -18,13 +18,19 @@ import {
 import { Game } from "@/game/engine";
 import { DEFAULT_WORDS, newWordId } from "@/game/lexicon";
 import { formatScore, freshSave, loadSave, pushScore, sanitizeWords, writeSave } from "@/game/storage";
-import type { ChallengeMode, Save, Snap, Theater } from "@/game/types";
+import type { ChallengeMode, RunMode, Save, Snap, Theater } from "@/game/types";
+import { TROPHIES } from "@/game/types";
 
-type Screen = "menu" | "play" | "lexicon" | "scores" | "install";
+type Screen = "menu" | "play" | "lexicon" | "scores" | "trophies" | "install";
 
 const THEATERS: { id: Theater; label: string; copy: string }[] = [
   { id: "space", label: "星域", copy: "駕駛新的攔截機。敵艦會開火，首領掉到血線就鎖盾。" },
   { id: "night", label: "喪屍夜", copy: "屍群會停在遠處瞄準你。普通屍吐一口，跑尸連射，壯屍撒酸。答對才能打屍王。" },
+];
+
+const RUNS: { id: RunMode; label: string; copy: string }[] = [
+  { id: "campaign", label: "闖關", copy: "8 關是設計好的。光門會在中間停一下。第 4、6、8 關打首領，打完就結束。" },
+  { id: "endless", label: "無限", copy: "沒有結尾。每 3 陣一個首領，血量和攻勢會一直往上加。" },
 ];
 
 const MODES: { id: ChallengeMode; label: string; copy: string }[] = [
@@ -60,8 +66,18 @@ export function StarAssault() {
     setSave(loaded);
     game.setWords(loaded.words);
     game.setMode(loaded.mode);
+    game.setRun(loaded.run);
+    game.setOwned(loaded.trophies);
     game.setTheater(loaded.theater);
     game.setMuted(loaded.muted);
+    game.onProgress = (evt) => {
+      setSave((prev) => {
+        const trophies = evt.id && !prev.trophies.includes(evt.id) ? [...prev.trophies, evt.id] : prev.trophies;
+        const next = { ...prev, points: prev.points + evt.points, trophies };
+        writeSave(next);
+        return next;
+      });
+    };
     const unsub = game.subscribe(setSnap);
 
     let raf = 0;
@@ -129,6 +145,7 @@ export function StarAssault() {
     writeSave(next);
     gameRef.current?.setWords(next.words);
     gameRef.current?.setMode(next.mode);
+    gameRef.current?.setRun(next.run);
     gameRef.current?.setTheater(next.theater);
     gameRef.current?.setMuted(next.muted);
   }
@@ -138,6 +155,8 @@ export function StarAssault() {
     if (!game) return;
     game.setWords(save.words);
     game.setMode(save.mode);
+    game.setRun(save.run);
+    game.setOwned(save.trophies);
     game.setTheater(save.theater);
     game.setMuted(save.muted);
     game.start();
@@ -152,6 +171,7 @@ export function StarAssault() {
       score: snap.score,
       wave: snap.wave,
       at: Date.now(),
+      run: snap.run,
     };
     commit({ ...save, scores: pushScore(save.scores, row) });
     setSavedScore(true);
@@ -166,6 +186,7 @@ export function StarAssault() {
   }
 
   const mode = MODES.find((m) => m.id === save.mode) ?? MODES[0]!;
+  const run = RUNS.find((r) => r.id === save.run) ?? RUNS[0]!;
   const theater = THEATERS.find((t) => t.id === save.theater) ?? THEATERS[0]!;
   const over = screen === "play" && snap?.status === "over";
   const paused = screen === "play" && Boolean(snap?.paused) && !over;
@@ -212,15 +233,39 @@ export function StarAssault() {
                 aria-hidden="true"
               />
               <p className="mt-3 text-base leading-relaxed text-muted">
-                {save.theater === "night"
-                  ? "先撞光門。×2、+6 會加人，−4、÷2 會減人。人越多，後面的槍越多。一共 8 關。"
-                  : "先撞光門。×2、+6 會加人，−4、÷2 會減人。人越多，後面的槍越多。一共 8 關。"}
+                光門會在畫面中間停住，看清再選。闖關一共 8 關。無限沒有結尾，越後面越硬。
               </p>
+              <p className="mt-3 text-sm text-accent">積分 {formatScore(save.points)} · 獎杯 {save.trophies.length}/{TROPHIES.length}</p>
               {best && (
                 <p className="mt-4 text-sm text-accent">
                   本機最高 {formatScore(best.score)} · {best.name}
                 </p>
               )}
+            </div>
+
+            <div>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="玩法">
+                {RUNS.map((item) => {
+                  const on = save.run === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      className={
+                        on
+                          ? "min-h-11 rounded-xl bg-primary px-2 font-display text-base font-semibold text-bg"
+                          : "min-h-11 rounded-xl border border-border bg-surface px-2 font-display text-base text-muted"
+                      }
+                      onClick={() => commit({ ...save, run: item.id })}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-sm text-muted">{run.copy}</p>
             </div>
 
             <div>
@@ -296,6 +341,9 @@ export function StarAssault() {
                 <Trophy className="size-5" aria-hidden="true" />
                 本機高分
               </Ghost>
+              <Ghost onClick={() => setScreen("trophies")}>
+                獎杯 {save.trophies.length}/{TROPHIES.length}
+              </Ghost>
             </div>
             <Ghost onClick={() => setScreen("install")}>
               <Smartphone className="size-5" aria-hidden="true" />
@@ -328,9 +376,10 @@ export function StarAssault() {
               </div>
               <p className="mt-2 font-display text-4xl font-bold text-fg">{snap.crew} 人</p>
               <p className="text-sm text-muted">
-                第 {snap.wave}/{snap.levels} 關 · {snap.boss ? snap.boss.name : snap.waveName}
+                {snap.run === "endless" ? `無限 · 第 ${snap.wave} 陣` : `闖關 · 第 ${snap.wave}/${snap.levels} 關`} · {snap.boss ? snap.boss.name : snap.waveName}
               </p>
               <p className="font-display text-xl font-semibold text-fg">{formatScore(snap.score)}</p>
+              <p className="text-xs text-accent">本局積分 +{formatScore(snap.runPoints)}</p>
             </div>
             <button
               type="button"
@@ -521,8 +570,8 @@ export function StarAssault() {
           title={snap.cleared ? "八關通過" : snap.theater === "night" ? "被屍群淹沒" : "艦體損毀"}
           lede={
             snap.cleared
-              ? `全部打完 · ${snap.crew} 人 · ${formatScore(snap.score)} 分`
-              : `停在第 ${snap.wave} 關 · ${formatScore(snap.score)} 分`
+              ? `全部打完 · ${snap.crew} 人 · ${formatScore(snap.score)} 分 · 本局積分 +${formatScore(snap.runPoints)}`
+              : `${snap.run === "endless" ? "無限" : "闖關"}停在第 ${snap.wave} ${snap.run === "endless" ? "陣" : "關"} · ${formatScore(snap.score)} 分 · 本局積分 +${formatScore(snap.runPoints)}`
           }
         >
           <label className="block text-sm text-muted" htmlFor="pilot-name">
@@ -580,12 +629,35 @@ export function StarAssault() {
                   </span>
                   <span className="text-right text-sm text-muted">
                     <span className="block font-display text-base text-fg">{formatScore(row.score)}</span>
-                    第 {row.wave} 波
+                    第 {row.wave} {row.run === "endless" ? "陣" : "關"}
                   </span>
                 </li>
               ))}
             </ol>
           )}
+        </Panel>
+      )}
+
+      {screen === "trophies" && (
+        <Panel
+          title="獎杯"
+          onBack={() => setScreen("menu")}
+          lede={`積分 ${formatScore(save.points)}。解鎖才入帳，同一隻獎杯只算一次。`}
+        >
+          <ul className="grid gap-2">
+            {TROPHIES.map((item) => {
+              const owned = save.trophies.includes(item.id);
+              return (
+                <li key={item.id} className={`rounded-xl border px-4 py-3 ${owned ? "border-primary bg-bg" : "border-border bg-bg/40"}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={owned ? "font-display text-fg" : "font-display text-muted"}>{item.name}</span>
+                    <span className="text-sm text-accent">{owned ? `+${item.points}` : "未解鎖"}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted">{item.detail}</p>
+                </li>
+              );
+            })}
+          </ul>
         </Panel>
       )}
 

@@ -1,5 +1,5 @@
 import { DEFAULT_WORDS, newWordId } from "@/game/lexicon";
-import type { ChallengeMode, Save, ScoreRow, Theater, Word } from "@/game/types";
+import { TROPHIES, type ChallengeMode, type RunMode, type Save, type ScoreRow, type Theater, type TrophyId, type Word } from "@/game/types";
 
 const KEY = "starlex.v1";
 
@@ -9,9 +9,26 @@ export function freshSave(): Save {
     words: DEFAULT_WORDS.map((w) => ({ ...w })),
     scores: [],
     mode: "mix",
+    run: "campaign",
     theater: "space",
     muted: false,
+    points: 0,
+    trophies: [],
   };
+}
+
+function asRun(v: unknown): RunMode {
+  return v === "endless" ? "endless" : "campaign";
+}
+
+function asTrophies(v: unknown): TrophyId[] {
+  if (!Array.isArray(v)) return [];
+  const known = new Set(TROPHIES.map((t) => t.id));
+  const out: TrophyId[] = [];
+  for (const id of v) {
+    if (typeof id === "string" && known.has(id as TrophyId) && !out.includes(id as TrophyId)) out.push(id as TrophyId);
+  }
+  return out;
 }
 
 function asMode(v: unknown): ChallengeMode {
@@ -53,6 +70,7 @@ function sanitizeScores(input: unknown): ScoreRow[] {
       score: Math.max(0, Math.floor(score)),
       wave: Math.max(1, Math.floor(wave)),
       at: Number.isFinite(at) ? at : 0,
+      run: rec.run === "endless" ? "endless" : rec.run === "campaign" ? "campaign" : undefined,
     });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, 8);
@@ -70,8 +88,11 @@ export function loadSave(): Save {
       words: words.length > 0 ? words : freshSave().words,
       scores: sanitizeScores(parsed.scores),
       mode: asMode(parsed.mode),
+      run: asRun(parsed.run),
       theater: asTheater(parsed.theater),
       muted: Boolean(parsed.muted),
+      points: Math.max(0, Math.floor(Number(parsed.points) || 0)),
+      trophies: asTrophies(parsed.trophies),
     };
   } catch {
     return freshSave();

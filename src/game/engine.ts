@@ -1,7 +1,7 @@
 import { Sfx } from "@/game/audio";
 import { bossName, DEFAULT_WORDS, makeQuestion, type BuiltQuestion } from "@/game/lexicon";
 import { SpriteBook, type SheetId } from "@/game/sprites";
-import type { ChallengeMode, PublicQuestion, QuizKind, Snap, Theater, Word } from "@/game/types";
+import type { ChallengeMode, PublicQuestion, QuizKind, RunMode, Snap, Theater, TrophyId, Word } from "@/game/types";
 
 const PHASES = [2 / 3, 1 / 3];
 const FONT = '"PingFang TC", "Microsoft JhengHei", "WenQuanYi Zen Hei", sans-serif';
@@ -80,6 +80,34 @@ const LEVELS: LevelDef[] = [
   },
 ];
 
+function endlessDef(level: number): LevelDef {
+  const add = 4 + level * 2;
+  const pairs: [GateChoice, GateChoice][] = [
+    [
+      { op: "×", n: level >= 8 ? 3 : 2 },
+      { op: "+", n: add },
+    ],
+  ];
+  pairs.push(
+    level % 2 === 0
+      ? [
+          { op: "-", n: 3 + level },
+          { op: "+", n: 6 + level },
+        ]
+      : [
+          { op: "÷", n: 2 },
+          { op: "×", n: level >= 6 ? 3 : 2 },
+        ],
+  );
+  if (level >= 5) {
+    pairs.push([
+      { op: "×", n: level >= 9 ? 4 : 3 },
+      { op: "-", n: 8 + level },
+    ]);
+  }
+  return { name: `第 ${level} 陣`, pairs, boss: level % 3 === 0 };
+}
+
 type Gate = {
   pair: number;
   x: number;
@@ -91,6 +119,7 @@ type Gate = {
   good: boolean;
   vy: number;
   alive: boolean;
+  freeze: number;
 };
 
 const PAL = {
@@ -274,6 +303,14 @@ export class Game {
   private gateGap = 0;
   private gateSerial = 1;
   private cleared = false;
+  private run: RunMode = "campaign";
+  private script: LevelDef = LEVELS[0]!;
+  private owned = new Set<TrophyId>();
+  private solved = 0;
+  private redOffered = false;
+  private redTaken = false;
+  private runPoints = 0;
+  onProgress: ((e: { id?: TrophyId; name?: string; points: number }) => void) | null = null;
   private queue: Craft[] = [];
   private shake = 0;
   private hurtFlash = 0;
@@ -324,6 +361,14 @@ export class Game {
 
   setMode(mode: ChallengeMode) {
     this.mode = mode;
+  }
+
+  setRun(run: RunMode) {
+    this.run = run;
+  }
+
+  setOwned(ids: TrophyId[]) {
+    this.owned = new Set(ids);
   }
 
   setTheater(theater: Theater) {
@@ -387,6 +432,10 @@ export class Game {
     this.pairCursor = 0;
     this.gateGap = 0;
     this.cleared = false;
+    this.solved = 0;
+    this.redOffered = false;
+    this.redTaken = false;
+    this.runPoints = 0;
     this.queue = [];
     this.shake = 0;
     this.hurtFlash = 0;
@@ -527,7 +576,7 @@ export class Game {
   }
 
   private beginLevel() {
-    const def = LEVELS[this.level - 1] ?? LEVELS[0]!;
+    this.script = this.run === "campaign" ? (LEVELS[this.level - 1] ?? LEVELS[0]!) : endlessDef(this.level);
     this.wave = this.level;
     this.queue = [];
     this.leftToSpawn = 0;
@@ -535,12 +584,32 @@ export class Game {
     this.stage = "gates";
     this.gates = [];
     this.pairCursor = 0;
-    this.gateGap = 0.15;
+    this.gateGap = 0.45;
     this.asksLeft = 0;
-    this.waveName = def.name;
-    this.banner = `第 ${this.level} 關 · 選一扇光門`;
-    this.bannerT = 1.6;
+    this.redOffered = false;
+    this.redTaken = false;
+    this.waveName = this.script.name;
+    this.banner = `第 ${this.level} ${this.run === "endless" ? "陣" : "關"} · 光門會停一下`;
+    this.bannerT = 2.2;
     this.clearHold = 0;
+  }
+
+  private grant(id: TrophyId, name: string, points: number) {
+    if (this.owned.has(id)) return;
+    this.owned.add(id);
+    this.runPoints += points;
+    this.banner = `獎杯 · ${name}  +${points}`;
+    this.bannerT = 1.8;
+    this.float(this.w / 2, this.h * 0.24, `獎杯 · ${name}`, PAL.amber);
+    this.onProgress?.({ id, name, points });
+    this.sfx.good();
+    this.emit();
+  }
+
+  private bank(points: number) {
+    if (points <= 0) return;
+    this.runPoints += points;
+    this.onProgress?.({ points });
   }
 
   private spawnPair(pair: [GateChoice, GateChoice]) {
@@ -558,26 +627,38 @@ export class Game {
         op: choice.op,
         n: choice.n,
         good: choice.op === "+" || choice.op === "×",
-        vy: 128 + this.level * 7,
+        vy: 0,
         alive: true,
+        freeze: 0,
       });
+      if (choice.op === "-" || choice.op === "÷") this.redOffered = true;
     });
   }
 
   private tickGates(dt: number) {
+    const band = this.h * 0.34;
     for (const g of this.gates) {
       if (!g.alive) continue;
-      g.y += g.vy * dt;
+      if (g.freeze > 0) {
+        g.freeze -= dt;
+        if (g.freeze <= 0) g.freeze = -1;
+        continue;
+      }
+      if (g.y < band) g.y += 46 * dt;
+      else g.y += (62 + Math.min(18, this.level)) * dt;
+      if (g.freeze === 0 && g.y >= band && g.y < band + 40) {
+        g.y = band;
+        g.freeze = 1.8;
+      }
       if (g.y - g.h / 2 > this.h + 6) g.alive = false;
     }
     if (this.gates.some((g) => g.alive)) return;
-    const def = LEVELS[this.level - 1];
-    if (def && this.pairCursor < def.pairs.length) {
+    if (this.pairCursor < this.script.pairs.length) {
       this.gateGap -= dt;
       if (this.gateGap > 0) return;
-      this.spawnPair(def.pairs[this.pairCursor]!);
+      this.spawnPair(this.script.pairs[this.pairCursor]!);
       this.pairCursor += 1;
-      this.gateGap = 0.55;
+      this.gateGap = 1.15;
       return;
     }
     this.startFight();
@@ -590,6 +671,9 @@ export class Game {
     else if (g.op === "×") this.crew *= g.n;
     else this.crew = Math.floor(this.crew / Math.max(1, g.n));
     this.crew = clamp(Math.round(this.crew), 1, 80);
+    if (!g.good) this.redTaken = true;
+    if (this.crew >= 20) this.grant("crowd", "成軍", 60);
+    if (this.crew >= 50) this.grant("army", "軍團", 120);
     for (const other of this.gates) if (other.pair === g.pair) other.alive = false;
     const up = this.crew >= before;
     this.banner = `${g.op}${g.n} → ${this.crew} 人`;
@@ -630,6 +714,9 @@ export class Game {
   }
 
   private win() {
+    this.grant("clear", "通關", 300);
+    if (this.theater === "night") this.grant("night", "夜行", 200);
+    this.bank(200);
     this.cleared = true;
     this.status = "over";
     this.banner = "八關通過";
@@ -694,14 +781,20 @@ export class Game {
       this.tickGates(dt);
     } else if (!any && this.leftToSpawn <= 0) {
       this.clearHold += dt;
-      if (this.clearHold >= 1.15) {
-        const def = LEVELS[this.level - 1];
-        const bonus = 120 * this.level;
+      if (this.clearHold >= 1.6) {
+        const bossDue = this.run === "endless" ? this.level % 3 === 0 : this.script.boss;
+        const bonus = 80 * this.level;
         this.score += bonus;
+        this.bank(20 * this.level);
         this.float(this.w / 2, this.h * 0.32, `+${bonus}`, PAL.amber);
         this.clearHold = 0;
-        if (this.stage === "fight" && def?.boss) this.startBoss();
-        else if (this.level < LEVELS.length) {
+        if (this.run === "campaign" && this.level === 1) this.grant("first", "起步", 40);
+        if (this.redOffered && !this.redTaken) this.grant("picky", "挑門", 80);
+        if (this.run === "endless" && this.level >= 10) this.grant("ten", "十陣", 100);
+        if (this.run === "endless" && this.level >= 25) this.grant("march", "長征", 200);
+        if (this.score >= 20000) this.grant("score", "高分", 100);
+        if (this.stage === "fight" && bossDue) this.startBoss();
+        else if (this.run === "endless" || this.level < LEVELS.length) {
           this.level += 1;
           this.drop(this.w / 2, this.h * 0.42);
           this.beginLevel();
@@ -709,6 +802,7 @@ export class Game {
         this.emit();
       }
     } else this.clearHold = 0;
+    if (this.score >= 20000) this.grant("score", "高分", 100);
     this.compact();
   }
 
@@ -833,7 +927,8 @@ export class Game {
     const tier = Math.floor((this.wave - 1) / 3);
     const slot = (this.wave % 3) - 1;
     const pattern = (tier * 2 + slot) % 5;
-    const n = 4 + Math.min(3, tier);
+    const cap = this.run === "endless" ? 10 : 5;
+    const n = 4 + Math.min(cap, tier + Math.floor((this.level - 1) / 3));
     const titles = ["橫列推進", "兩翼夾擊", "後排封路", "慢隊帶路", "尖刃插入"];
     const crafts: Craft[] = [];
     const lane = (i: number, count: number) => {
@@ -892,7 +987,8 @@ export class Game {
   private spawnCraft(craft: Craft, hold: number) {
     const night = this.theater === "night";
     const kind = craft.kind;
-    const hp = night
+    const grow = 1 + (this.level - 1) * 0.55;
+    const hp = Math.max(1, Math.round((night
       ? kind === "tank"
         ? 8 + Math.floor(this.wave / 2)
         : kind === "dart"
@@ -900,7 +996,7 @@ export class Game {
           : 2 + Math.floor((this.wave - 1) / 4)
       : kind === "tank"
         ? 4 + Math.floor(this.wave / 3)
-        : 1 + Math.floor((this.wave - 1) / 5);
+        : 1 + Math.floor((this.wave - 1) / 5)) * grow));
     const enemy: Enemy = {
       kind,
       x: craft.x,
@@ -941,7 +1037,7 @@ export class Game {
 
   private spawnBoss() {
     const quiz = this.quizForWave();
-    const maxHp = Math.round(120 + this.level * 48);
+    const maxHp = Math.round(560 * Math.pow(1.48, this.level - 1));
     this.enemies.push({
       kind: "boss",
       x: this.w / 2,
@@ -1181,46 +1277,52 @@ export class Game {
   }
 
   private bossVolley(e: Enemy) {
+    const pace = Math.max(0.46, 1 - (this.level - 1) * 0.055);
+    const extra = Math.min(6, Math.floor((this.level - 1) / 2));
     const ord = Math.max(1, this.wave / 3);
     const night = this.theater === "night";
     if (night && e.phase === 1) {
       e.wind = 0.42;
-      e.cool = 2;
-      for (let i = -2; i <= 2; i++) {
-        const ang = Math.PI / 2 + i * 0.32;
-        this.cast(e.x, e.y + e.r * 0.4, Math.cos(ang) * 160, Math.sin(ang) * 150, "blob", 7, 160);
+      e.cool = 1.35 * pace;
+      for (let i = -2 - Math.min(1, extra); i <= 2 + Math.min(1, extra); i++) {
+        const ang = Math.PI / 2 + i * 0.28;
+        this.cast(e.x, e.y + e.r * 0.4, Math.cos(ang) * (180 + extra * 12), Math.sin(ang) * (170 + extra * 8), "blob", 7, 160);
       }
       return;
     }
     if (e.phase <= 0) {
-      e.cool = night ? 1.2 : 1.05;
-      if (night) this.launchAt(e.x, e.y + 10, 230 + ord * 8, 120, 0.16, 5, 5.2);
+      e.cool = (night ? 1.05 : 0.92) * pace;
+      if (night) this.launchAt(e.x, e.y + 10, 250 + ord * 10 + extra * 8, 140, 0.14, 5 + extra, 5.2);
       else {
         for (const s of [-1, 1]) {
           const ang = Math.PI / 2 + s * 0.42;
-          this.cast(e.x + s * e.r * 1.3, e.y + 8, Math.cos(ang) * 230, Math.sin(ang) * 230, "shard", 4.2);
+          this.cast(e.x + s * e.r * 1.3, e.y + 8, Math.cos(ang) * (250 + extra * 14), Math.sin(ang) * (250 + extra * 14), "shard", 4.2);
         }
-        this.cast(e.x, e.y + e.r * 0.4, 0, 250, "shard", 4.2);
+        this.cast(e.x, e.y + e.r * 0.4, 0, 270 + extra * 16, "shard", 4.2);
+        if (extra > 0) this.shootAim(e.x, e.y, 240 + extra * 10);
       }
       return;
     }
     if (e.phase === 1) {
-      e.cool = 1.45;
-      for (let i = 0; i < 7; i++) this.cast(e.x, e.y + e.r * 0.2 + i * 6, 0, 520, "beam", 5.5);
+      e.cool = 1.15 * pace;
+      const bolts = 7 + extra;
+      for (let i = 0; i < bolts; i++) this.cast(e.x + (i - (bolts - 1) / 2) * 10, e.y + e.r * 0.2, 0, 540 + extra * 12, "beam", 5.5);
       return;
     }
     if (night) {
-      e.cool = 1.05;
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2 + e.t;
-        this.cast(e.x, e.y, Math.cos(a) * 70, Math.sin(a) * 40 + 30, "blob", 6, 90);
+      e.cool = 0.82 * pace;
+      const n = 8 + extra;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + e.t;
+        this.cast(e.x, e.y, Math.cos(a) * (80 + extra * 6), Math.sin(a) * (48 + extra * 4) + 30, "blob", 6, 90);
       }
       return;
     }
-    e.cool = 0.38;
-    e.guard += 0.62;
-    this.cast(e.x, e.y, Math.cos(e.guard) * 210, Math.sin(e.guard) * 210, "shard", 4);
-    this.cast(e.x, e.y, Math.cos(e.guard + Math.PI) * 210, Math.sin(e.guard + Math.PI) * 210, "shard", 4);
+    e.cool = Math.max(0.22, 0.34 * pace);
+    e.guard += 0.62 + extra * 0.04;
+    this.cast(e.x, e.y, Math.cos(e.guard) * (230 + extra * 12), Math.sin(e.guard) * (230 + extra * 12), "shard", 4);
+    this.cast(e.x, e.y, Math.cos(e.guard + Math.PI) * (230 + extra * 12), Math.sin(e.guard + Math.PI) * (230 + extra * 12), "shard", 4);
+    if (extra >= 3) this.cast(e.x, e.y, Math.cos(e.guard + Math.PI / 2) * 180, Math.sin(e.guard + Math.PI / 2) * 180, "shard", 4);
   }
 
   private summonRing() {
@@ -1548,6 +1650,9 @@ export class Game {
   }
 
   private solveGate() {
+    this.solved += 1;
+    this.bank(12);
+    if (this.solved >= 8) this.grant("scholar", "學霸", 80);
     const foe = this.gate ?? this.liveBoss();
     const fast = this.time - this.gateAt < 4.2;
     this.built = null;
@@ -2490,7 +2595,7 @@ export class Game {
       ctx.fillRect(-g.w / 2, -2, g.w, 4);
       ctx.globalAlpha = 1;
       ctx.fillStyle = "#ffffff";
-      ctx.font = `800 40px ${FONT}`;
+      ctx.font = `800 48px ${FONT}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(`${g.op}${g.n}`, 0, 2);
@@ -2579,6 +2684,8 @@ export class Game {
       crew: this.crew,
       levels: LEVELS.length,
       cleared: this.cleared,
+      run: this.run,
+      runPoints: this.runPoints,
       question: this.question,
       muted: this.sfx.muted,
     };
